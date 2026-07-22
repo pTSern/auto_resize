@@ -28,7 +28,6 @@ interface GlobalConfig {
 function loadGlobalConfig(): ConfigDimension[] {
   const defaultDimensions = [
     { w: 1, h: 1 },
-    { w: 9, h: 16 },
     { w: 16, h: 9 }
   ];
 

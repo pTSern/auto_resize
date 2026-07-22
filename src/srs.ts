@@ -9,24 +9,26 @@ import ora from 'ora';
 import { resizeVideo, getVideoMetadata, calculateTargetDimensions } from './index.js';
 import { ResizeOptions } from './types.js';
 
-// Open native WinForms Folder browser dialog
-function selectFolderDialog(): string | null {
+// Open native WinForms File selector dialog allowing multi-file selection
+function selectFilesDialog(): string[] {
   const script = [
     'Add-Type -AssemblyName System.Windows.Forms',
-    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-    '$d.Description = \'Chon thu muc chua video .mp4\'',
-    '$d.ShowNewFolderButton = $false',
+    '$d = New-Object System.Windows.Forms.OpenFileDialog',
+    '$d.Filter = \'Video Files (*.mp4)|*.mp4\'',
+    '$d.Multiselect = $true',
+    '$d.Title = \'Chon cac file video .mp4\'',
     '$win = New-Object System.Windows.Forms.NativeWindow',
     '$win.AssignHandle([System.Diagnostics.Process]::GetCurrentProcess().MainWindowHandle)',
-    'if ($d.ShowDialog($win) -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }'
+    'if ($d.ShowDialog($win) -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileNames }'
   ].join('; ');
 
   try {
     const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${script}"`;
     const stdout = execSync(cmd, { encoding: 'utf8' }).trim();
-    return stdout || null;
+    if (!stdout) return [];
+    return stdout.split(/\r?\n/).map(f => f.trim()).filter(f => f.length > 0);
   } catch (e) {
-    return null;
+    return [];
   }
 }
 
@@ -58,17 +60,18 @@ function sanitizeFilename(name: string): string {
 
 async function main() {
   console.log(chalk.cyan('===================================================='));
-  console.log(chalk.bold.cyan('       AUTO RESIZE VIDEO - SELECT DIALOG MODE (srs)'));
+  console.log(chalk.bold.cyan('       AUTO RESIZE VIDEO - MULTI-FILE DIALOG (srs)'));
   console.log(chalk.cyan('===================================================='));
-  console.log(chalk.yellow('Đang mở hộp thoại chọn thư mục...'));
+  console.log(chalk.yellow('Đang mở hộp thoại chọn các file video .mp4...'));
 
-  const folderPath = selectFolderDialog();
-  if (!folderPath) {
-    console.log(chalk.red('Không có thư mục nào được chọn. Đang thoát.'));
+  const files = selectFilesDialog();
+  if (files.length === 0) {
+    console.log(chalk.red('Không có file nào được chọn. Đang thoát.'));
     process.exit(0);
   }
 
-  console.log(`\n${chalk.green('Thư mục đã chọn:')} ${folderPath}`);
+  console.log(`\n${chalk.green('Các file đã chọn:')}`);
+  files.forEach(f => console.log(`  - ${path.basename(f)}`));
   console.log(chalk.cyan('----------------------------------------------------'));
 
   const renameAnswer = (await askQuestion(chalk.yellow('Có đặt lại tên không ( y/n ): '))).toLowerCase();
@@ -93,26 +96,15 @@ async function main() {
     owner = sanitizeFilename(rawOwner) || 'UnknownOwner';
   }
 
-  const sizeAnswer = await askQuestion(chalk.yellow('Kích thước muốn render (1x1, 9x16, 16x9, all) [all]: '));
-  let targetRatios: ('1:1' | '9:16' | '16:9')[] = ['1:1', '9:16', '16:9'];
+  const sizeAnswer = await askQuestion(chalk.yellow('Kích thước muốn render (1x1, 16x9, all) [all]: '));
+  let targetRatios: ('1:1' | '16:9')[] = ['1:1', '16:9'];
   if (sizeAnswer === '1x1' || sizeAnswer === '1:1') {
     targetRatios = ['1:1'];
-  } else if (sizeAnswer === '9x16') {
-    targetRatios = ['9:16'];
   } else if (sizeAnswer === '16x9') {
     targetRatios = ['16:9'];
   }
 
-  const files = fs.readdirSync(folderPath)
-    .filter(f => f.toLowerCase().endsWith('.mp4'))
-    .map(f => path.join(folderPath, f));
-
-  if (files.length === 0) {
-    console.log(chalk.red('\nKhông tìm thấy file .mp4 nào trong thư mục này.'));
-    process.exit(0);
-  }
-
-  console.log(chalk.cyan(`\nTìm thấy ${files.length} video .mp4. Bắt đầu xử lý...\n`));
+  console.log(chalk.cyan(`\nTiến hành resize ${files.length} video .mp4...\n`));
 
   for (let i = 0; i < files.length; i++) {
     const filePath = files[i];
@@ -139,7 +131,8 @@ async function main() {
         outName = `${base}_${ratioSuffix}${ext}`;
       }
 
-      const outPath = path.join(folderPath, outName);
+      // Save output video in the same directory as its original source file
+      const outPath = path.join(path.dirname(filePath), outName);
 
       const jobOpts: ResizeOptions = {
         inputPath: filePath,
