@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "auto-resize": "./dist/cli.js"
+    "auto-resize": "./dist/cli.js",
+    "auto_resize": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
