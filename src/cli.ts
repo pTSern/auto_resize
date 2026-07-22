@@ -164,13 +164,33 @@ cli
 
       console.log(chalk.cyan(`Đã tìm thấy ${filesToProcess.length} file .mp4 để tiến hành xử lý.`));
 
-      // 2. Ask user details in Vietnamese
-      const rawGameName = await askQuestion(chalk.yellow('Tên game là gì: '));
-      const rawOwner = await askQuestion(chalk.yellow('Chủ sở hữu: '));
+      // 2. Ask if they want to rename
+      const renameAnswer = (await askQuestion(chalk.yellow('Có đặt lại tên không ( y/n ): '))).toLowerCase();
+      
+      const yesOptions = ['y', 'c', 'co', 'ye', 'yes'];
+      const noOptions = ['', 'n', 'k', 'no', 'ko', 'kh', 'kho', 'kog', 'khong'];
 
-      const gameName = sanitizeFilename(rawGameName) || 'UnknownGame';
-      const owner = sanitizeFilename(rawOwner) || 'UnknownOwner';
+      let shouldRename = false;
+      if (yesOptions.includes(renameAnswer)) {
+        shouldRename = true;
+      } else if (noOptions.includes(renameAnswer)) {
+        shouldRename = false;
+      } else {
+        // Default to false (no rename) if they put something else
+        shouldRename = false;
+      }
+
+      let gameName = '';
+      let owner = '';
       const currentDate = getFormattedDate();
+
+      if (shouldRename) {
+        const rawGameName = await askQuestion(chalk.yellow('Tên game là gì: '));
+        const rawOwner = await askQuestion(chalk.yellow('Chủ sở hữu: '));
+
+        gameName = sanitizeFilename(rawGameName) || 'UnknownGame';
+        owner = sanitizeFilename(rawOwner) || 'UnknownOwner';
+      }
 
       interface ConversionJob {
         options: ResizeOptions;
@@ -192,8 +212,17 @@ cli
 
         // Helper to format output filepath based on the custom naming rule
         const buildOutputPath = (suffix: string): string => {
-          // Format: ddmmyy_%game_name%_%owner%_%the_target_size%_%origin_name%
-          const formattedName = `${currentDate}_${gameName}_${owner}_${suffix}_${originName}`;
+          const ext = path.extname(filePath);
+          const base = path.basename(filePath, ext);
+
+          let formattedName: string;
+          if (shouldRename) {
+            // Format: ddmmyy_%game_name%_%owner%_%the_target_size%_%origin_name%
+            formattedName = `${currentDate}_${gameName}_${owner}_${suffix}_${base}${ext}`;
+          } else {
+            // Format: %origin_name%_%the_target_size%
+            formattedName = `${base}_${suffix}${ext}`;
+          }
           
           let targetDir = path.dirname(filePath);
 
