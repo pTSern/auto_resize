@@ -20,4 +20,4 @@ Thumbs.db
 
 # Web project directory
 .web/
-
+.app/

@@ -7,7 +7,8 @@
   "bin": {
     "auto-resize": "./dist/cli.js",
     "auto_resize": "./dist/cli.js",
-    "rs": "./dist/cli.js"
+    "rs": "./dist/cli.js",
+    "srs": "./dist/srs.js"
   },
   "scripts": {
     "build": "tsc",
