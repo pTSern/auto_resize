@@ -7,68 +7,8 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import readline from 'readline';
-import { resizeVideo, getVideoMetadata, calculateTargetDimensions } from './index.js';
+import { resizeVideo, getVideoMetadata, calculateTargetDimensions, loadGlobalConfig, getFractionLabel } from './index.js';
 import { ResizeOptions } from './types.js';
-
-const CONFIG_PATH = path.join(os.homedir(), '.auto_resize_config.json');
-
-interface ConfigDimension {
-  w: number;
-  h: number;
-}
-
-interface GlobalConfig {
-  dimensions?: ConfigDimension[];
-  demensions?: ConfigDimension[]; // Support user's spelling
-}
-
-/**
- * Loads the global configurations from ~/.auto_resize_config.json
- */
-function loadGlobalConfig(): ConfigDimension[] {
-  const defaultDimensions = [
-    { w: 1080, h: 1080 },
-    { w: 1920, h: 1080 }
-  ];
-
-  if (!fs.existsSync(CONFIG_PATH)) {
-    const defaultConfig = {
-      dimensions: defaultDimensions
-    };
-    try {
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-    } catch (err: any) {
-      console.warn(chalk.yellow(`Warning: Could not create default config at ${CONFIG_PATH}: ${err.message}`));
-    }
-    return defaultDimensions;
-  }
-
-  try {
-    const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
-    const parsed = JSON.parse(content) as GlobalConfig;
-    const list = parsed.dimensions || parsed.demensions;
-    if (Array.isArray(list) && list.length > 0) {
-      // Migrate legacy fractional ratios to absolute pixel sizes automatically
-      let migrated = false;
-      const updatedList = list.map(dim => {
-        if (dim.w === 1 && dim.h === 1) { migrated = true; return { w: 1080, h: 1080 }; }
-        if (dim.w === 16 && dim.h === 9) { migrated = true; return { w: 1920, h: 1080 }; }
-        if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
-        return dim;
-      });
-      if (migrated) {
-        try {
-          fs.writeFileSync(CONFIG_PATH, JSON.stringify({ dimensions: updatedList }, null, 2), 'utf-8');
-        } catch (e) {}
-      }
-      return updatedList;
-    }
-  } catch (err: any) {
-    console.warn(chalk.yellow(`Warning: Failed to parse global config at ${CONFIG_PATH}. Using defaults. Error: ${err.message}`));
-  }
-
-  return defaultDimensions;
-}
 
 /**
  * Helper to prompt the user for input in the terminal.
@@ -213,6 +153,16 @@ cli
 
       const jobs: ConversionJob[] = [];
 
+      // Load configuration once
+      const { dimensions: configDims, replacer } = loadGlobalConfig();
+
+      // Determine duplicated fractions in global configuration
+      const fractionCounts: Record<string, number> = {};
+      for (const dim of configDims) {
+        const frac = getFractionLabel(dim.w, dim.h);
+        fractionCounts[frac] = (fractionCounts[frac] || 0) + 1;
+      }
+
       // 3. Configure jobs for each file
       for (const filePath of filesToProcess) {
         const originName = path.basename(filePath);
@@ -225,17 +175,33 @@ cli
         }
 
         // Helper to format output filepath based on the custom naming rule
-        const buildOutputPath = (suffix: string): string => {
+        const buildOutputPath = (w: number, h: number): string => {
           const ext = path.extname(filePath);
           const base = path.basename(filePath, ext);
+          const frac = getFractionLabel(w, h);
+          const isDuplicated = fractionCounts[frac] > 1;
 
           let formattedName: string;
           if (shouldRename) {
             // Format: ddmmyy_%game_name%_%owner%_%the_target_size%_%origin_name%
-            formattedName = `${currentDate}_${gameName}_${owner}_${suffix}_${base}${ext}`;
+            formattedName = `${currentDate}_${gameName}_${owner}_${frac}_${base}${ext}`;
           } else {
-            // Format: %origin_name%_%the_target_size%
-            formattedName = `${base}_${suffix}${ext}`;
+            // Smart Naming Logic (When shouldRename is false)
+            const regex = new RegExp(replacer, 'gi');
+            if (regex.test(base)) {
+              let tempName = base.replace(regex, frac);
+              if (isDuplicated) {
+                formattedName = `${tempName}_${w}x${h}${ext}`;
+              } else {
+                formattedName = `${tempName}${ext}`;
+              }
+            } else {
+              if (isDuplicated) {
+                formattedName = `${base}_${frac}_${w}x${h}${ext}`;
+              } else {
+                formattedName = `${base}_${frac}${ext}`;
+              }
+            }
           }
           
           let targetDir = path.dirname(filePath);
@@ -259,14 +225,14 @@ cli
             } catch (err) {}
           }
 
-          return path.join(targetDir, formattedName);
+          return path.join(targetDir, formattedName).replace(/\\/g, '/');
         };
 
         if (customW && customH) {
           // Custom dimensions conversion
           const jobOpts: ResizeOptions = {
             inputPath: filePath,
-            outputPath: buildOutputPath(`${customW}x${customH}`),
+            outputPath: buildOutputPath(customW, customH),
             aspectRatio: 'custom',
             width: customW,
             height: customH,
@@ -278,37 +244,37 @@ cli
           const ratio = options.ratio as '1:1' | '9:16' | '16:9';
           const jobOpts: ResizeOptions = {
             inputPath: filePath,
-            outputPath: buildOutputPath(ratio.replace(':', 'x')),
+            outputPath: '', // Temporarily empty, will fill below
             aspectRatio: ratio,
             blurSigma
           };
           const targetDim = calculateTargetDimensions(jobOpts, metadata);
+          jobOpts.outputPath = buildOutputPath(targetDim.width, targetDim.height);
           jobs.push({ options: jobOpts, label: `${targetDim.width}x${targetDim.height} (${ratio})` });
         } else {
           // Default: Generate all targets loaded from global config
-          const configDims = loadGlobalConfig();
           for (const dim of configDims) {
             const w = dim.w;
             const h = dim.h;
             
             let jobOpts: ResizeOptions;
             let label: string;
-            let suffix: string;
 
             if (w <= 100 && h <= 100) {
               const ratio = `${w}:${h}` as '1:1' | '9:16' | '16:9';
               jobOpts = {
                 inputPath: filePath,
-                outputPath: buildOutputPath(`${w}x${h}`),
+                outputPath: '', // Will fill below
                 aspectRatio: ratio,
                 blurSigma
               };
               const targetDim = calculateTargetDimensions(jobOpts, metadata);
+              jobOpts.outputPath = buildOutputPath(targetDim.width, targetDim.height);
               label = `${targetDim.width}x${targetDim.height} (${ratio})`;
             } else {
               jobOpts = {
                 inputPath: filePath,
-                outputPath: buildOutputPath(`${w}x${h}`),
+                outputPath: buildOutputPath(w, h),
                 aspectRatio: 'custom',
                 width: w,
                 height: h,

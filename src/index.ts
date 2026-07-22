@@ -1,5 +1,87 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import ffmpeg from './ffmpeg.js';
 import { ResizeOptions, Dimension } from './types.js';
+
+export const CONFIG_PATH = path.join(os.homedir(), '.auto_resize_config.json');
+
+export interface ConfigDimension {
+  w: number;
+  h: number;
+}
+
+interface GlobalConfig {
+  dimensions?: ConfigDimension[];
+  demensions?: ConfigDimension[];
+  replacer?: string;
+}
+
+export interface LoadedConfig {
+  dimensions: ConfigDimension[];
+  replacer: string;
+}
+
+/**
+ * Calculates a simplified ratio label from width and height (e.g. 1080x1080 -> 1x1, 1920x1080 -> 16x9)
+ */
+export function getFractionLabel(w: number, h: number): string {
+  const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+  const divisor = gcd(w, h);
+  return `${w / divisor}x${h / divisor}`;
+}
+
+/**
+ * Loads the global configurations from ~/.auto_resize_config.json
+ */
+export function loadGlobalConfig(): LoadedConfig {
+  const defaultDimensions = [
+    { w: 1080, h: 1080 },
+    { w: 1920, h: 1080 }
+  ];
+  const defaultReplacer = '9x16';
+
+  if (!fs.existsSync(CONFIG_PATH)) {
+    const defaultConfig = {
+      dimensions: defaultDimensions,
+      replacer: defaultReplacer
+    };
+    try {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+    } catch (err: any) {}
+    return { dimensions: defaultDimensions, replacer: defaultReplacer };
+  }
+
+  try {
+    const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    const parsed = JSON.parse(content) as GlobalConfig;
+    const list = parsed.dimensions || parsed.demensions || defaultDimensions;
+    const replacer = parsed.replacer || defaultReplacer;
+
+    // Migrate legacy fractional ratios to absolute pixel sizes automatically
+    let migrated = false;
+    const updatedList = list.map(dim => {
+      if (dim.w === 1 && dim.h === 1) { migrated = true; return { w: 1080, h: 1080 }; }
+      if (dim.w === 16 && dim.h === 9) { migrated = true; return { w: 1920, h: 1080 }; }
+      if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
+      return dim;
+    });
+
+    if (migrated || !parsed.replacer) {
+      try {
+        fs.writeFileSync(
+          CONFIG_PATH,
+          JSON.stringify({ dimensions: updatedList, replacer }, null, 2),
+          'utf-8'
+        );
+      } catch (e) {}
+    }
+
+    return { dimensions: updatedList, replacer };
+  } catch (err: any) {
+    return { dimensions: defaultDimensions, replacer: defaultReplacer };
+  }
+}
 
 interface VideoMetadata {
   width: number;

@@ -6,7 +6,7 @@ import fs from 'fs';
 import readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
-import { resizeVideo, getVideoMetadata, calculateTargetDimensions } from './index.js';
+import { resizeVideo, getVideoMetadata, calculateTargetDimensions, loadGlobalConfig, getFractionLabel } from './index.js';
 import { ResizeOptions } from './types.js';
 
 // Open native WinForms File selector dialog allowing multi-file selection
@@ -75,6 +75,16 @@ async function main() {
   files.forEach(f => console.log(`  - ${path.basename(f)}`));
   console.log(chalk.cyan('----------------------------------------------------'));
 
+  // Load configuration once
+  const { dimensions: configDims, replacer } = loadGlobalConfig();
+
+  // Determine duplicated fractions in global configuration
+  const fractionCounts: Record<string, number> = {};
+  for (const dim of configDims) {
+    const frac = getFractionLabel(dim.w, dim.h);
+    fractionCounts[frac] = (fractionCounts[frac] || 0) + 1;
+  }
+
   const renameAnswer = (await askQuestion(chalk.yellow('Có đặt lại tên không ( y/n ): '))).toLowerCase();
   
   const yesOptions = ['y', 'c', 'co', 'ye', 'yes'];
@@ -131,16 +141,33 @@ async function main() {
     for (const target of targets) {
       const ext = path.extname(filePath);
       const base = path.basename(filePath, ext);
+      const frac = getFractionLabel(target.w, target.h);
+      const isDuplicated = fractionCounts[frac] > 1;
       
       let outName: string;
       if (shouldRename) {
-        outName = `${currentDate}_${gameName}_${owner}_${target.label}_${base}${ext}`;
+        outName = `${currentDate}_${gameName}_${owner}_${frac}_${base}${ext}`;
       } else {
-        outName = `${base}_${target.label}${ext}`;
+        // Smart Naming Logic (When shouldRename is false)
+        const regex = new RegExp(replacer, 'gi');
+        if (regex.test(base)) {
+          let tempName = base.replace(regex, frac);
+          if (isDuplicated) {
+            outName = `${tempName}_${target.w}x${target.h}${ext}`;
+          } else {
+            outName = `${tempName}${ext}`;
+          }
+        } else {
+          if (isDuplicated) {
+            outName = `${base}_${frac}_${target.w}x${target.h}${ext}`;
+          } else {
+            outName = `${base}_${frac}${ext}`;
+          }
+        }
       }
 
       // Save output video in the same directory as its original source file
-      const outPath = path.join(path.dirname(filePath), outName);
+      const outPath = path.join(path.dirname(filePath), outName).replace(/\\/g, '/');
 
       const jobOpts: ResizeOptions = {
         inputPath: filePath,
@@ -152,7 +179,7 @@ async function main() {
       };
 
       const targetDim = calculateTargetDimensions(jobOpts, metadata);
-      console.log(chalk.cyan(`  -> Kích thước ${target.label} (${targetDim.width}x${targetDim.height})`));
+      console.log(chalk.cyan(`  -> Kích thước ${frac} (${targetDim.width}x${targetDim.height})`));
 
       const spinner = ora(`  Đang render... 0%`).start();
       const startTime = Date.now();

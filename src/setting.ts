@@ -16,48 +16,55 @@ interface Dimension {
 interface GlobalConfig {
   dimensions?: Dimension[];
   demensions?: Dimension[];
+  replacer?: string;
 }
 
-function loadConfig(): Dimension[] {
+interface LoadedConfig {
+  dimensions: Dimension[];
+  replacer: string;
+}
+
+function loadConfig(): LoadedConfig {
   const defaultDimensions = [
     { w: 1080, h: 1080 },
     { w: 1920, h: 1080 }
   ];
+  const defaultReplacer = '9x16';
 
   if (!fs.existsSync(CONFIG_PATH)) {
-    const defaultConfig = { dimensions: defaultDimensions };
+    const defaultConfig = { dimensions: defaultDimensions, replacer: defaultReplacer };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-    return defaultDimensions;
+    return { dimensions: defaultDimensions, replacer: defaultReplacer };
   }
 
   try {
     const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(content) as GlobalConfig;
-    const list = parsed.dimensions || parsed.demensions;
-    if (Array.isArray(list)) {
-      // Migrate legacy fractional ratios to absolute pixel sizes automatically
-      let migrated = false;
-      const updatedList = list.map(dim => {
-        if (dim.w === 1 && dim.h === 1) { migrated = true; return { w: 1080, h: 1080 }; }
-        if (dim.w === 16 && dim.h === 9) { migrated = true; return { w: 1920, h: 1080 }; }
-        if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
-        return dim;
-      });
-      if (migrated) {
-        saveConfig(updatedList);
-      }
-      return updatedList;
+    const list = parsed.dimensions || parsed.demensions || defaultDimensions;
+    const replacer = parsed.replacer || defaultReplacer;
+    
+    // Migrate legacy fractional ratios to absolute pixel sizes automatically
+    let migrated = false;
+    const updatedList = list.map(dim => {
+      if (dim.w === 1 && dim.h === 1) { migrated = true; return { w: 1080, h: 1080 }; }
+      if (dim.w === 16 && dim.h === 9) { migrated = true; return { w: 1920, h: 1080 }; }
+      if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
+      return dim;
+    });
+    if (migrated || !parsed.replacer) {
+      saveConfig(updatedList, replacer);
     }
+    return { dimensions: updatedList, replacer };
   } catch (err) {
     console.log(chalk.red('Error reading config file, resetting to defaults.'));
   }
 
-  return defaultDimensions;
+  return { dimensions: defaultDimensions, replacer: defaultReplacer };
 }
 
-function saveConfig(dimensions: Dimension[]): boolean {
+function saveConfig(dimensions: Dimension[], replacer: string): boolean {
   try {
-    const config = { dimensions };
+    const config = { dimensions, replacer };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
     return true;
   } catch (err: any) {
@@ -80,7 +87,7 @@ function askQuestion(query: string): Promise<string> {
 async function menuLoop() {
   while (true) {
     console.clear();
-    const dimensions = loadConfig();
+    const { dimensions, replacer } = loadConfig();
     
     console.log(chalk.cyan('===================================================='));
     console.log(chalk.bold.cyan('        CẤU HÌNH AUTO RESIZE VIDEO (.json)'));
@@ -99,10 +106,11 @@ async function menuLoop() {
     console.log(chalk.cyan('----------------------------------------------------'));
     console.log(chalk.yellow('  [A] Thêm kích thước mới (Add)'));
     console.log(chalk.yellow('  [D] Xóa kích thước (Delete)'));
+    console.log(chalk.yellow(`  [R] Thay đổi chuỗi thay thế (Replacer) [Hiện tại: "${replacer}"]`));
     console.log(chalk.yellow('  [Q] Thoát (Quit)'));
     console.log(chalk.cyan('===================================================='));
 
-    const choice = (await askQuestion(chalk.cyan('Nhập lựa chọn của bạn (A/D/Q): '))).toUpperCase();
+    const choice = (await askQuestion(chalk.cyan('Nhập lựa chọn của bạn (A/D/R/Q): '))).toUpperCase();
 
     if (choice === 'Q' || choice === '') {
       console.log(chalk.green('Tạm biệt!'));
@@ -132,7 +140,7 @@ async function menuLoop() {
       }
 
       dimensions.push({ w, h });
-      if (saveConfig(dimensions)) {
+      if (saveConfig(dimensions, replacer)) {
         console.log(chalk.green(`\n[OK] Đã thêm kích thước ${w}x${h} thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
@@ -155,8 +163,22 @@ async function menuLoop() {
       }
 
       const removed = dimensions.splice(idx - 1, 1)[0];
-      if (saveConfig(dimensions)) {
+      if (saveConfig(dimensions, replacer)) {
         console.log(chalk.green(`\n[OK] Đã xóa kích thước ${removed.w}x${removed.h} thành công! Ấn enter để tiếp tục.`));
+      }
+      await askQuestion('');
+    }
+    else if (choice === 'R') {
+      console.log(chalk.bold.yellow('\n--- Thay Đổi Chuỗi Thay Thế (Replacer) ---'));
+      console.log(`Chuỗi thay thế hiện tại: "${replacer}"`);
+      const newReplacer = await askQuestion(chalk.yellow('Nhập chuỗi thay thế mới (e.g. 9x16): '));
+      if (newReplacer === '') {
+        console.log(chalk.red('\n[LỖI] Chuỗi thay thế không được trống. Ấn enter để quay lại.'));
+        await askQuestion('');
+        continue;
+      }
+      if (saveConfig(dimensions, newReplacer)) {
+        console.log(chalk.green(`\n[OK] Đã đổi chuỗi thay thế sang "${newReplacer}" thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
     }
