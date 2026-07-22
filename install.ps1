@@ -16,7 +16,8 @@ if (-not $isAdmin) {
         Invoke-WebRequest -Uri "https://raw.githubusercontent.com/pTSern/auto_resize/master/install.ps1" -OutFile $scriptPath
     }
     
-    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
+    # Pass arguments as a structured array to robustly handle spaces in paths (e.g. "Wild Boar PC")
+    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath -Verb RunAs
     Exit
 }
 
@@ -38,15 +39,15 @@ try {
 
     if (-not $nodeInstalled) {
         Write-Host "Node.js was not found. Downloading and installing Node.js v20 silently..." -ForegroundColor Yellow
-        $msiPath = "$env:TEMP\node-v20-x64.msi"
+        $msiPath = Join-Path $env:TEMP "node-v20-x64.msi"
         
         # Download official Node.js installer
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri "https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi" -OutFile $msiPath
         
-        # Run MSI silently
+        # Run MSI silently with structured arguments to handle spaces in Temp path
         Write-Host "Installing Node.js... Please wait..." -ForegroundColor Yellow
-        $process = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait -PassThru
+        $process = Start-Process msiexec.exe -ArgumentList "/i", $msiPath, "/qn", "/norestart" -Wait -PassThru
         if ($process.ExitCode -ne 0) {
             throw New-Object System.Exception("Node.js installation failed with exit code $($process.ExitCode)")
         }
@@ -95,7 +96,7 @@ try {
 
     if ($gitAvailable) {
         Write-Host "Git detected. Cloning repository..." -ForegroundColor Cyan
-        git clone https://github.com/pTSern/auto_resize.git $tempDir
+        git clone https://github.com/pTSern/auto_resize.git "$tempDir"
     } else {
         Write-Host "Git not found. Downloading ZIP archive from GitHub..." -ForegroundColor Cyan
         $zipPath = Join-Path $env:TEMP "auto_resize.zip"
@@ -122,7 +123,7 @@ try {
 
     # 5. Build and Install globally
     Write-Host "Installing dependencies and building the project..." -ForegroundColor Cyan
-    cd $tempDir
+    cd "$tempDir"
 
     # Ensure npm command is resolved in the refreshed path
     $npmCmd = "npm"
