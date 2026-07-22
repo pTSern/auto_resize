@@ -47,7 +47,7 @@ if exist "portable\node_modules" rd /s /q "portable\node_modules"
 robocopy "node_modules" "portable\node_modules" /E /XD .bin /NFL /NDL /NJH /NJS /nc /ns /np >nul
 
 rem 5. Create launcher batch file
-echo [5/5] Creating auto_resize.bat, rs.bat, and srs.bat launchers...
+echo [5/5] Creating auto_resize.bat, rs.bat, srs.bat, and rss.bat launchers...
 (
 echo @echo off
 echo "%%~dp0node.exe" "%%~dp0dist/cli.js" %%*
@@ -62,6 +62,11 @@ echo "%%~dp0node.exe" "%%~dp0dist/cli.js" %%*
 echo @echo off
 echo "%%~dp0node.exe" "%%~dp0dist/srs.js" %%*
 ) > "portable\srs.bat"
+
+(
+echo @echo off
+echo "%%~dp0node.exe" "%%~dp0dist/setting.js" %%*
+) > "portable\rss.bat"
 
 
 echo ====================================================

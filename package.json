@@ -8,7 +8,8 @@
     "auto-resize": "./dist/cli.js",
     "auto_resize": "./dist/cli.js",
     "rs": "./dist/cli.js",
-    "srs": "./dist/srs.js"
+    "srs": "./dist/srs.js",
+    "rss": "./dist/setting.js"
   },
   "scripts": {
     "build": "tsc",
