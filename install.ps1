@@ -141,6 +141,32 @@ try {
     Write-Host "Installing command globally..." -ForegroundColor Gray
     & $npmCmd install -g .
 
+    Write-Host "Creating Start Menu shortcuts for Windows Search..." -ForegroundColor Gray
+    try {
+        $programsPath = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs")
+        if (Test-Path $programsPath) {
+            $wsh = New-Object -ComObject WScript.Shell
+            
+            # 1. Shortcut for srs (Select Resize)
+            $srsShortcut = $wsh.CreateShortcut([System.IO.Path]::Combine($programsPath, "Select Resize (srs).lnk"))
+            $srsShortcut.TargetPath = "powershell.exe"
+            $srsShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command srs"
+            $srsShortcut.Description = "Open Select Resize Dialog Picker"
+            $srsShortcut.WorkingDirectory = $env:USERPROFILE
+            $srsShortcut.Save()
+            
+            # 2. Shortcut for rss (Resize Settings)
+            $rssShortcut = $wsh.CreateShortcut([System.IO.Path]::Combine($programsPath, "Resize Settings (rss).lnk"))
+            $rssShortcut.TargetPath = "powershell.exe"
+            $rssShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command rss"
+            $rssShortcut.Description = "Manage Auto-Resize Target Resolutions"
+            $rssShortcut.WorkingDirectory = $env:USERPROFILE
+            $rssShortcut.Save()
+        }
+    } catch {
+        Write-Host "Warning: Could not create Start Menu shortcuts: $_" -ForegroundColor Yellow
+    }
+
     Write-Host "====================================================" -ForegroundColor Green
     Write-Host " SUCCESS: Installation complete!" -ForegroundColor Green
     Write-Host " Use it anywhere in your terminal:" -ForegroundColor Green
