@@ -17,3 +17,7 @@ Thumbs.db
 
 # User source videos
 .sources/
+
+# Web project directory
+.web/
+
