@@ -38,6 +38,8 @@ if exist "portable\dist" rd /s /q "portable\dist"
 xcopy "dist" "portable\dist" /E /I /Y >nul
 
 copy "package.json" "portable\" >nul
+copy "all.bat" "portable\" >nul
+copy "what.bat" "portable\" >nul
 
 rem Copy node_modules using robocopy for fast, clean file operations on Windows
 echo Copying node_modules dependencies including FFmpeg and FFprobe binaries...
