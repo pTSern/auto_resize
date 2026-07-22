@@ -145,7 +145,8 @@ try {
     Write-Host "====================================================" -ForegroundColor Green
     Write-Host " SUCCESS: Installation complete!" -ForegroundColor Green
     Write-Host " Use it anywhere in your terminal:" -ForegroundColor Green
-    Write-Host "   auto_resize <video_path>" -ForegroundColor Yellow
+    Write-Host "   auto_resize <video_path> (Or 'rs')" -ForegroundColor Yellow
+    Write-Host "   srs (To open the Folder browser popup dialog)" -ForegroundColor Yellow
     Write-Host "====================================================" -ForegroundColor Green
 
 } catch {
