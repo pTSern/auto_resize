@@ -4,9 +4,8 @@ import ffmpegPath from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 
 // Handle CJS/ESM interop of the static path for ffmpeg
-const resolvedPath: string | null = typeof ffmpegPath === 'string' 
-  ? ffmpegPath 
-  : (ffmpegPath as any).default || null;
+const rawPath = typeof ffmpegPath === 'string' ? ffmpegPath : (ffmpegPath as any)?.default;
+const resolvedPath: string | null = typeof rawPath === 'string' ? rawPath.replace(/\\/g, '/') : null;
 
 if (resolvedPath) {
   ffmpeg.setFfmpegPath(resolvedPath);
@@ -16,7 +15,7 @@ if (resolvedPath) {
 
 // Handle CJS/ESM interop of the static path for ffprobe
 const resolvedFfprobePath: string | null = ffprobeStatic && typeof ffprobeStatic === 'object'
-  ? (ffprobeStatic as any).path || (ffprobeStatic as any).default?.path || null
+  ? ((ffprobeStatic as any).path || (ffprobeStatic as any).default?.path || '').replace(/\\/g, '/')
   : null;
 
 if (resolvedFfprobePath) {

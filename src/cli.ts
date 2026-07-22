@@ -129,7 +129,9 @@ cli
           process.exit(1);
         }
       } else {
-        const inputPath = path.resolve(input);
+        // Sanitize path (convert double slash c:// to c:/ and eliminate duplicate slashes)
+        const cleanedInput = input.replace(/^([a-zA-Z]):\/\/+/, '$1:/').replace(/([^:]|^)\/\/+/g, '$1/');
+        const inputPath = path.resolve(cleanedInput);
         if (!fs.existsSync(inputPath)) {
           console.error(chalk.red(`\nError: Đường dẫn đầu vào không tồn tại: ${input}`));
           process.exit(1);
