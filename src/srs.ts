@@ -12,6 +12,7 @@ import { ResizeOptions } from './types.js';
 // Open native WinForms File selector dialog allowing multi-file selection
 function selectFilesDialog(): string[] {
   const script = [
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     'Add-Type -AssemblyName System.Windows.Forms',
     '$d = New-Object System.Windows.Forms.OpenFileDialog',
     '$d.Filter = \'Video Files (*.mp4)|*.mp4\'',
