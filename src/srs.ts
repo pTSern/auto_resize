@@ -26,7 +26,7 @@ function selectFilesDialog(): string[] {
     const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${script}"`;
     const stdout = execSync(cmd, { encoding: 'utf8' }).trim();
     if (!stdout) return [];
-    return stdout.split(/\r?\n/).map(f => f.trim()).filter(f => f.length > 0);
+    return stdout.split(/\r?\n/).map(f => f.trim().replace(/\\/g, '/')).filter(f => f.length > 0);
   } catch (e) {
     return [];
   }
@@ -97,11 +97,19 @@ async function main() {
   }
 
   const sizeAnswer = await askQuestion(chalk.yellow('Kích thước muốn render (1x1, 16x9, all) [all]: '));
-  let targetRatios: ('1:1' | '16:9')[] = ['1:1', '16:9'];
+  interface TargetDim {
+    w: number;
+    h: number;
+    label: string;
+  }
+  let targets: TargetDim[] = [
+    { w: 1080, h: 1080, label: '1080x1080' },
+    { w: 1920, h: 1080, label: '1920x1080' }
+  ];
   if (sizeAnswer === '1x1' || sizeAnswer === '1:1') {
-    targetRatios = ['1:1'];
+    targets = [{ w: 1080, h: 1080, label: '1080x1080' }];
   } else if (sizeAnswer === '16x9') {
-    targetRatios = ['16:9'];
+    targets = [{ w: 1920, h: 1080, label: '1920x1080' }];
   }
 
   console.log(chalk.cyan(`\nTiến hành resize ${files.length} video .mp4...\n`));
@@ -119,16 +127,15 @@ async function main() {
       continue;
     }
 
-    for (const ratio of targetRatios) {
-      const ratioSuffix = ratio.replace(':', 'x');
+    for (const target of targets) {
       const ext = path.extname(filePath);
       const base = path.basename(filePath, ext);
       
       let outName: string;
       if (shouldRename) {
-        outName = `${currentDate}_${gameName}_${owner}_${ratioSuffix}_${base}${ext}`;
+        outName = `${currentDate}_${gameName}_${owner}_${target.label}_${base}${ext}`;
       } else {
-        outName = `${base}_${ratioSuffix}${ext}`;
+        outName = `${base}_${target.label}${ext}`;
       }
 
       // Save output video in the same directory as its original source file
@@ -137,12 +144,14 @@ async function main() {
       const jobOpts: ResizeOptions = {
         inputPath: filePath,
         outputPath: outPath,
-        aspectRatio: ratio,
+        aspectRatio: 'custom',
+        width: target.w,
+        height: target.h,
         blurSigma: 20
       };
 
       const targetDim = calculateTargetDimensions(jobOpts, metadata);
-      console.log(chalk.cyan(`  -> Kích thước ${ratioSuffix} (${targetDim.width}x${targetDim.height})`));
+      console.log(chalk.cyan(`  -> Kích thước ${target.label} (${targetDim.width}x${targetDim.height})`));
 
       const spinner = ora(`  Đang render... 0%`).start();
       const startTime = Date.now();

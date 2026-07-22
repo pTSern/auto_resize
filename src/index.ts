@@ -10,8 +10,9 @@ interface VideoMetadata {
  * Probes the video file to retrieve its display dimensions, taking rotation metadata into account.
  */
 export function getVideoMetadata(inputPath: string): Promise<VideoMetadata> {
+  const normalizedPath = inputPath.replace(/\\/g, '/');
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(inputPath, (err, metadata) => {
+    ffmpeg.ffprobe(normalizedPath, (err, metadata) => {
       if (err) {
         return reject(new Error(`Failed to probe video: ${err.message}`));
       }
@@ -45,37 +46,30 @@ export function calculateTargetDimensions(options: ResizeOptions, original: Vide
   let targetW = 1080;
   let targetH = 1080;
 
-  if (options.width && options.height) {
-    targetW = options.width;
-    targetH = options.height;
-  } else {
-    // Determine dimensions dynamically based on original source height
-    // to maintain resolution quality (e.g. if input height is 1080p, we keep the vertical tier)
-    const baseDimension = original.height > 0 ? original.height : 1080;
+  const { aspectRatio, width, height } = options;
 
-    switch (options.aspectRatio) {
-      case '1:1':
-        targetW = baseDimension;
-        targetH = baseDimension;
-        break;
-      case '9:16':
-        // Standard HD vertical aspect ratio calculation
-        targetH = baseDimension;
-        // Make sure it is proportional to 9:16 (approx width = height * 9 / 16)
-        targetW = Math.round((baseDimension * 9) / 16);
-        break;
-      case '16:9':
-        targetH = baseDimension;
-        targetW = Math.round((baseDimension * 16) / 9);
-        break;
-      default:
-        // Default to 1:1 if nothing specified
-        targetW = baseDimension;
-        targetH = baseDimension;
+  if (aspectRatio === 'custom') {
+    if (!width || !height) {
+      throw new Error('Custom aspect ratio requires width and height');
     }
+    return { width: Math.round(width / 2) * 2, height: Math.round(height / 2) * 2 };
   }
 
-  // FFmpeg requires even dimensions for H.264/yuv420p video codecs
+  const srcW = original.width;
+  const srcH = original.height;
+  const baseDimension = srcH > 0 ? srcH : 1080;
+
+  if (aspectRatio === '1:1') {
+    targetW = baseDimension;
+    targetH = baseDimension;
+  } else if (aspectRatio === '9:16') {
+    targetH = baseDimension;
+    targetW = Math.round((baseDimension * 9) / 16);
+  } else if (aspectRatio === '16:9') {
+    targetH = baseDimension;
+    targetW = Math.round((baseDimension * 16) / 9);
+  }
+
   targetW = Math.round(targetW / 2) * 2;
   targetH = Math.round(targetH / 2) * 2;
 
@@ -89,9 +83,11 @@ export async function resizeVideo(
   options: ResizeOptions,
   onProgress?: (percent: number) => void
 ): Promise<void> {
-  const { inputPath, outputPath, blurSigma = 20 } = options;
+  const inputPath = options.inputPath.replace(/\\/g, '/');
+  const outputPath = options.outputPath.replace(/\\/g, '/');
+  const { blurSigma = 20 } = options;
   const metadata = await getVideoMetadata(inputPath);
-  const target = calculateTargetDimensions(options, metadata);
+  const target = calculateTargetDimensions({ ...options, inputPath, outputPath }, metadata);
 
   const targetW = target.width;
   const targetH = target.height;

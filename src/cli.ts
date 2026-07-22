@@ -27,8 +27,8 @@ interface GlobalConfig {
  */
 function loadGlobalConfig(): ConfigDimension[] {
   const defaultDimensions = [
-    { w: 1, h: 1 },
-    { w: 16, h: 9 }
+    { w: 1080, h: 1080 },
+    { w: 1920, h: 1080 }
   ];
 
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -48,7 +48,20 @@ function loadGlobalConfig(): ConfigDimension[] {
     const parsed = JSON.parse(content) as GlobalConfig;
     const list = parsed.dimensions || parsed.demensions;
     if (Array.isArray(list) && list.length > 0) {
-      return list;
+      // Migrate legacy fractional ratios to absolute pixel sizes automatically
+      let migrated = false;
+      const updatedList = list.map(dim => {
+        if (dim.w === 1 && dim.h === 1) { migrated = true; return { w: 1080, h: 1080 }; }
+        if (dim.w === 16 && dim.h === 9) { migrated = true; return { w: 1920, h: 1080 }; }
+        if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
+        return dim;
+      });
+      if (migrated) {
+        try {
+          fs.writeFileSync(CONFIG_PATH, JSON.stringify({ dimensions: updatedList }, null, 2), 'utf-8');
+        } catch (e) {}
+      }
+      return updatedList;
     }
   } catch (err: any) {
     console.warn(chalk.yellow(`Warning: Failed to parse global config at ${CONFIG_PATH}. Using defaults. Error: ${err.message}`));
@@ -99,7 +112,7 @@ function findMp4Files(dirPath: string): string[] {
     const files = fs.readdirSync(dirPath);
     return files
       .filter(f => f.toLowerCase().endsWith('.mp4'))
-      .map(f => path.join(dirPath, f));
+      .map(f => path.join(dirPath, f).replace(/\\/g, '/'));
   } catch (err) {
     return [];
   }
@@ -121,7 +134,7 @@ cli
       // 1. Determine input files
       if (!input) {
         // Default: Scan current working directory for .mp4 files
-        const cwd = process.cwd();
+        const cwd = process.cwd().replace(/\\/g, '/');
         filesToProcess = findMp4Files(cwd);
         if (filesToProcess.length === 0) {
           console.error(chalk.red(`\nError: Không tìm thấy file .mp4 nào trong thư mục hiện tại: ${cwd}`));
@@ -129,8 +142,8 @@ cli
         }
       } else {
         // Sanitize path (convert double slash c:// to c:/ and eliminate duplicate slashes)
-        const cleanedInput = input.replace(/^([a-zA-Z]):\/\/+/, '$1:/').replace(/([^:]|^)\/\/+/g, '$1/');
-        const inputPath = path.resolve(cleanedInput);
+        const cleanedInput = input.replace(/^([a-zA-Z]):\/\/+/, '$1:/').replace(/([^:]|^)\/\/+/g, '$1/').replace(/\\/g, '/');
+        const inputPath = path.resolve(cleanedInput).replace(/\\/g, '/');
         if (!fs.existsSync(inputPath)) {
           console.error(chalk.red(`\nError: Đường dẫn đầu vào không tồn tại: ${input}`));
           process.exit(1);

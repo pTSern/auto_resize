@@ -8,8 +8,8 @@ const CONFIG_PATH = path.join(os.homedir(), '.auto_resize_config.json');
 
 function loadConfig() {
   const defaultDimensions = [
-    { w: 1, h: 1 },
-    { w: 16, h: 9 }
+    { w: 1080, h: 1080 },
+    { w: 1920, h: 1080 }
   ];
 
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -23,7 +23,18 @@ function loadConfig() {
     const parsed = JSON.parse(content);
     const list = parsed.dimensions || parsed.demensions;
     if (Array.isArray(list)) {
-      return list;
+      // Migrate legacy fractional ratios to absolute pixel sizes automatically
+      let migrated = false;
+      const updatedList = list.map(dim => {
+        if (dim.w === 1 && dim.h === 1) { migrated = true; return { w: 1080, h: 1080 }; }
+        if (dim.w === 16 && dim.h === 9) { migrated = true; return { w: 1920, h: 1080 }; }
+        if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
+        return dim;
+      });
+      if (migrated) {
+        saveConfig(updatedList);
+      }
+      return updatedList;
     }
   } catch (err) {
     console.log('Error reading config file, resetting to defaults.');
