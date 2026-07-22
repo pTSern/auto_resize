@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "bin": {
     "auto-resize": "./dist/cli.js",
-    "auto_resize": "./dist/cli.js"
+    "auto_resize": "./dist/cli.js",
+    "rs": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
