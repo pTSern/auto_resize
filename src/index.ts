@@ -11,15 +11,22 @@ export interface ConfigDimension {
   h: number;
 }
 
+export interface BlurConfig {
+  type: 'gaussian' | 'box' | 'smart';
+  params: Record<string, any>;
+}
+
 interface GlobalConfig {
   dimensions?: ConfigDimension[];
   demensions?: ConfigDimension[];
   replacer?: string;
+  blur?: BlurConfig;
 }
 
 export interface LoadedConfig {
   dimensions: ConfigDimension[];
   replacer: string;
+  blur: BlurConfig;
 }
 
 /**
@@ -40,16 +47,24 @@ export function loadGlobalConfig(): LoadedConfig {
     { w: 1920, h: 1080 }
   ];
   const defaultReplacer = '9x16';
+  const defaultBlur: BlurConfig = {
+    type: 'gaussian',
+    params: {
+      sigma: 20,
+      steps: 3
+    }
+  };
 
   if (!fs.existsSync(CONFIG_PATH)) {
     const defaultConfig = {
       dimensions: defaultDimensions,
-      replacer: defaultReplacer
+      replacer: defaultReplacer,
+      blur: defaultBlur
     };
     try {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
     } catch (err: any) {}
-    return { dimensions: defaultDimensions, replacer: defaultReplacer };
+    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
   }
 
   try {
@@ -57,6 +72,7 @@ export function loadGlobalConfig(): LoadedConfig {
     const parsed = JSON.parse(content) as GlobalConfig;
     const list = parsed.dimensions || parsed.demensions || defaultDimensions;
     const replacer = parsed.replacer || defaultReplacer;
+    const blur = parsed.blur || defaultBlur;
 
     // Migrate legacy fractional ratios to absolute pixel sizes automatically
     let migrated = false;
@@ -67,19 +83,19 @@ export function loadGlobalConfig(): LoadedConfig {
       return dim;
     });
 
-    if (migrated || !parsed.replacer) {
+    if (migrated || !parsed.replacer || !parsed.blur) {
       try {
         fs.writeFileSync(
           CONFIG_PATH,
-          JSON.stringify({ dimensions: updatedList, replacer }, null, 2),
+          JSON.stringify({ dimensions: updatedList, replacer, blur }, null, 2),
           'utf-8'
         );
       } catch (e) {}
     }
 
-    return { dimensions: updatedList, replacer };
+    return { dimensions: updatedList, replacer, blur };
   } catch (err: any) {
-    return { dimensions: defaultDimensions, replacer: defaultReplacer };
+    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
   }
 }
 
@@ -167,17 +183,49 @@ export async function resizeVideo(
 ): Promise<void> {
   const inputPath = options.inputPath.replace(/\\/g, '/');
   const outputPath = options.outputPath.replace(/\\/g, '/');
-  const { blurSigma = 20 } = options;
+  const { blurSigma } = options;
   const metadata = await getVideoMetadata(inputPath);
   const target = calculateTargetDimensions({ ...options, inputPath, outputPath }, metadata);
 
   const targetW = target.width;
   const targetH = target.height;
 
+  // Load blur configuration
+  const { blur } = loadGlobalConfig();
+  let blurFilter = 'gblur';
+  let blurOpts: any = { sigma: 20, steps: 3 };
+
+  if (blurSigma !== undefined) {
+    // Explicit CLI override
+    blurFilter = 'gblur';
+    blurOpts = { sigma: blurSigma, steps: 3 };
+  } else if (blur && blur.type && blur.params) {
+    if (blur.type === 'gaussian') {
+      blurFilter = 'gblur';
+      blurOpts = {
+        sigma: typeof blur.params.sigma === 'number' ? blur.params.sigma : 20,
+        steps: typeof blur.params.steps === 'number' ? blur.params.steps : 3
+      };
+    } else if (blur.type === 'box') {
+      blurFilter = 'boxblur';
+      blurOpts = {
+        lr: typeof blur.params.radius === 'number' ? blur.params.radius : 20,
+        lp: typeof blur.params.power === 'number' ? blur.params.power : 2
+      };
+    } else if (blur.type === 'smart') {
+      blurFilter = 'smartblur';
+      blurOpts = {
+        lr: typeof blur.params.radius === 'number' ? blur.params.radius : 5,
+        ls: typeof blur.params.strength === 'number' ? blur.params.strength : 1.0,
+        lt: typeof blur.params.threshold === 'number' ? blur.params.threshold : -0.5
+      };
+    }
+  }
+
   // Build the filter description array for fluent-ffmpeg complexFilter:
   // 1. bg_scale: scale input video so it's large enough to cover the target box completely
   // 2. bg_crop: crop the scaled background to fit the target width and height exactly
-  // 3. bg_blur: apply Gaussian blur to the cropped background
+  // 3. bg_blur: apply the chosen blur to the cropped background
   // 4. fg_scale: scale original input video to fit inside target box, keeping original aspect ratio
   // 5. overlay: overlay fg centered on top of bg_blur
   const filters = [
@@ -201,11 +249,8 @@ export async function resizeVideo(
       outputs: 'bg_crop'
     },
     {
-      filter: 'gblur',
-      options: {
-        sigma: blurSigma,
-        steps: 3
-      },
+      filter: blurFilter,
+      options: blurOpts,
       inputs: 'bg_crop',
       outputs: 'bg_blur'
     },

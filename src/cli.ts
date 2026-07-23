@@ -66,7 +66,7 @@ cli
   .option('-r, --ratio <ratio>', 'Target aspect ratio: "1:1", "9:16", or "16:9" (defaults to loading config presets if omitted)')
   .option('--width <width>', 'Custom target width in pixels (requires --height)')
   .option('--height <height>', 'Custom target height in pixels (requires --width)')
-  .option('--blur <sigma>', 'Gaussian blur sigma value (default: 20)', { default: 20 })
+  .option('--blur <sigma>', 'Gaussian blur sigma value override (falls back to config if omitted)')
   .action(async (input, options) => {
     try {
       let filesToProcess: string[] = [];
@@ -109,7 +109,7 @@ cli
 
       const customW = options.width ? parseInt(options.width, 10) : undefined;
       const customH = options.height ? parseInt(options.height, 10) : undefined;
-      const blurSigma = parseFloat(options.blur);
+      const blurSigma = options.blur ? parseFloat(options.blur) : undefined;
 
       if ((customW && !customH) || (!customW && customH)) {
         console.error(chalk.red(`\nError: Both --width and --height must be provided for custom resizing.`));
@@ -228,6 +228,39 @@ cli
           return path.join(targetDir, formattedName).replace(/\\/g, '/');
         };
 
+        // Clone the original file if shouldRename is true
+        if (shouldRename) {
+          const ext = path.extname(filePath);
+          const base = path.basename(filePath, ext);
+          let targetDir = path.dirname(filePath);
+
+          if (options.output) {
+            const resolvedOut = path.resolve(options.output);
+            try {
+              if (fs.existsSync(resolvedOut) && fs.statSync(resolvedOut).isDirectory()) {
+                targetDir = resolvedOut;
+              } else if (!fs.existsSync(resolvedOut)) {
+                if (!path.extname(resolvedOut)) {
+                  fs.mkdirSync(resolvedOut, { recursive: true });
+                  targetDir = resolvedOut;
+                } else {
+                  targetDir = path.dirname(resolvedOut);
+                }
+              }
+            } catch (err) {}
+          }
+
+          const clonedName = `${currentDate}_${gameName}_${owner}_${replacer}_${base}${ext}`;
+          const clonedPath = path.join(targetDir, clonedName).replace(/\\/g, '/');
+
+          try {
+            fs.copyFileSync(filePath, clonedPath);
+            console.log(chalk.green(`  [OK] Đã sao chép file gốc sang: ${clonedName}`));
+          } catch (err: any) {
+            console.error(chalk.red(`  [Lỗi] Không thể sao chép file gốc: ${err.message}`));
+          }
+        }
+
         if (customW && customH) {
           // Custom dimensions conversion
           const jobOpts: ResizeOptions = {
@@ -298,7 +331,7 @@ cli
         console.log(`${chalk.cyan('File gốc:')}       ${originName}`);
         console.log(`${chalk.cyan('Cấu hình:')}       ${job.label}`);
         console.log(`${chalk.cyan('File đầu ra:')}    ${job.options.outputPath}`);
-        console.log(`${chalk.cyan('Blur Strength:')}   gblur sigma=${blurSigma}`);
+        console.log(`${chalk.cyan('Hiệu ứng Blur:')}   ${blurSigma !== undefined ? 'Gaussian (sigma=' + blurSigma + ')' : 'Theo cấu hình hệ thống (Config default)'}`);
         console.log(chalk.bold.blue('----------------------------------------\n'));
 
         // Ensure directory of output path exists

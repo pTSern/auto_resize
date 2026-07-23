@@ -17,11 +17,18 @@ interface GlobalConfig {
   dimensions?: Dimension[];
   demensions?: Dimension[];
   replacer?: string;
+  blur?: BlurConfig;
+}
+
+interface BlurConfig {
+  type: 'gaussian' | 'box' | 'smart';
+  params: Record<string, any>;
 }
 
 interface LoadedConfig {
   dimensions: Dimension[];
   replacer: string;
+  blur: BlurConfig;
 }
 
 function loadConfig(): LoadedConfig {
@@ -30,11 +37,18 @@ function loadConfig(): LoadedConfig {
     { w: 1920, h: 1080 }
   ];
   const defaultReplacer = '9x16';
+  const defaultBlur: BlurConfig = {
+    type: 'gaussian',
+    params: {
+      sigma: 20,
+      steps: 3
+    }
+  };
 
   if (!fs.existsSync(CONFIG_PATH)) {
-    const defaultConfig = { dimensions: defaultDimensions, replacer: defaultReplacer };
+    const defaultConfig = { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-    return { dimensions: defaultDimensions, replacer: defaultReplacer };
+    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
   }
 
   try {
@@ -42,6 +56,7 @@ function loadConfig(): LoadedConfig {
     const parsed = JSON.parse(content) as GlobalConfig;
     const list = parsed.dimensions || parsed.demensions || defaultDimensions;
     const replacer = parsed.replacer || defaultReplacer;
+    const blur = parsed.blur || defaultBlur;
     
     // Migrate legacy fractional ratios to absolute pixel sizes automatically
     let migrated = false;
@@ -51,20 +66,20 @@ function loadConfig(): LoadedConfig {
       if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
       return dim;
     });
-    if (migrated || !parsed.replacer) {
-      saveConfig(updatedList, replacer);
+    if (migrated || !parsed.replacer || !parsed.blur) {
+      saveConfig(updatedList, replacer, blur);
     }
-    return { dimensions: updatedList, replacer };
+    return { dimensions: updatedList, replacer, blur };
   } catch (err) {
     console.log(chalk.red('Error reading config file, resetting to defaults.'));
   }
 
-  return { dimensions: defaultDimensions, replacer: defaultReplacer };
+  return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
 }
 
-function saveConfig(dimensions: Dimension[], replacer: string): boolean {
+function saveConfig(dimensions: Dimension[], replacer: string, blur: BlurConfig): boolean {
   try {
-    const config = { dimensions, replacer };
+    const config = { dimensions, replacer, blur };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
     return true;
   } catch (err: any) {
@@ -87,7 +102,7 @@ function askQuestion(query: string): Promise<string> {
 async function menuLoop() {
   while (true) {
     console.clear();
-    const { dimensions, replacer } = loadConfig();
+    const { dimensions, replacer, blur } = loadConfig();
     
     console.log(chalk.cyan('===================================================='));
     console.log(chalk.bold.cyan('        CẤU HÌNH AUTO RESIZE VIDEO (.json)'));
@@ -107,10 +122,11 @@ async function menuLoop() {
     console.log(chalk.yellow('  [A] Thêm kích thước mới (Add)'));
     console.log(chalk.yellow('  [D] Xóa kích thước (Delete)'));
     console.log(chalk.yellow(`  [R] Thay đổi chuỗi thay thế (Replacer) [Hiện tại: "${replacer}"]`));
+    console.log(chalk.yellow(`  [B] Cài đặt hiệu ứng làm mờ (Blur) [Hiện tại: ${blur.type.toUpperCase()}]`));
     console.log(chalk.yellow('  [Q] Thoát (Quit)'));
     console.log(chalk.cyan('===================================================='));
 
-    const choice = (await askQuestion(chalk.cyan('Nhập lựa chọn của bạn (A/D/R/Q): '))).toUpperCase();
+    const choice = (await askQuestion(chalk.cyan('Nhập lựa chọn của bạn (A/D/R/B/Q): '))).toUpperCase();
 
     if (choice === 'Q' || choice === '') {
       console.log(chalk.green('Tạm biệt!'));
@@ -140,7 +156,7 @@ async function menuLoop() {
       }
 
       dimensions.push({ w, h });
-      if (saveConfig(dimensions, replacer)) {
+      if (saveConfig(dimensions, replacer, blur)) {
         console.log(chalk.green(`\n[OK] Đã thêm kích thước ${w}x${h} thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
@@ -163,7 +179,7 @@ async function menuLoop() {
       }
 
       const removed = dimensions.splice(idx - 1, 1)[0];
-      if (saveConfig(dimensions, replacer)) {
+      if (saveConfig(dimensions, replacer, blur)) {
         console.log(chalk.green(`\n[OK] Đã xóa kích thước ${removed.w}x${removed.h} thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
@@ -177,10 +193,83 @@ async function menuLoop() {
         await askQuestion('');
         continue;
       }
-      if (saveConfig(dimensions, newReplacer)) {
+      if (saveConfig(dimensions, newReplacer, blur)) {
         console.log(chalk.green(`\n[OK] Đã đổi chuỗi thay thế sang "${newReplacer}" thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
+    }
+    else if (choice === 'B') {
+      while (true) {
+        console.clear();
+        console.log(chalk.cyan('===================================================='));
+        console.log(chalk.bold.cyan('        CÀI ĐẶT HIỆU ỨNG LÀM MỜ (BLUR)'));
+        console.log(chalk.cyan('===================================================='));
+        console.log(`Loại làm mờ hiện tại: ${chalk.bold.green(blur.type.toUpperCase())}`);
+        console.log(chalk.cyan('----------------------------------------------------'));
+        console.log('Chọn hiệu ứng làm mờ mới:');
+        console.log('  [0] Gaussian Blur (Mịn, chất lượng cao nhất)');
+        console.log('  [1] Box Blur (Làm mờ khối - Nhanh, nhẹ)');
+        console.log('  [2] Smart Blur (Làm mờ thông minh - Giữ sắc nét biên)');
+        console.log(chalk.cyan('----------------------------------------------------'));
+        
+        const blurChoice = await askQuestion(chalk.cyan('Chọn loại làm mờ [0-2] [Mặc định: 0]: '));
+        if (blurChoice !== '' && blurChoice !== '0' && blurChoice !== '1' && blurChoice !== '2') {
+          console.log(chalk.red('\n[LỖI] Lựa chọn không hợp lệ, hãy chọn từ 0 đến 2. Ấn enter để chọn lại.'));
+          await askQuestion('');
+          continue;
+        }
+
+        let newType: 'gaussian' | 'box' | 'smart' = 'gaussian';
+        let newParams: Record<string, any> = {};
+
+        if (blurChoice === '1') {
+          newType = 'box';
+          console.log(chalk.bold.yellow('\n--- Cài Đặt Tham Số Box Blur ---'));
+          const radStr = await askQuestion('radius - Bán kính làm mờ (Số thực dương) [Mặc định: 20]: ');
+          const radius = radStr ? parseFloat(radStr) : 20;
+          const powStr = await askQuestion('power - Số lần lặp làm mờ (Số nguyên 1-5) [Mặc định: 2]: ');
+          const power = powStr ? parseInt(powStr, 10) : 2;
+
+          newParams = { 
+            radius: isNaN(radius) || radius <= 0 ? 20 : radius, 
+            power: isNaN(power) || power <= 0 ? 2 : power 
+          };
+        } else if (blurChoice === '2') {
+          newType = 'smart';
+          console.log(chalk.bold.yellow('\n--- Cài Đặt Tham Số Smart Blur ---'));
+          const radStr = await askQuestion('radius - Bán kính lân cận (Số thực dương) [Mặc định: 5]: ');
+          const radius = radStr ? parseFloat(radStr) : 5;
+          const strStr = await askQuestion('strength - Độ mạnh làm mờ (Số thực) [Mặc định: 1.0]: ');
+          const strength = strStr ? parseFloat(strStr) : 1.0;
+          const thrStr = await askQuestion('threshold - Ngưỡng lọc chi tiết (-30 đến 30) [Mặc định: -0.5]: ');
+          const threshold = thrStr ? parseFloat(thrStr) : -0.5;
+
+          newParams = {
+            radius: isNaN(radius) || radius <= 0 ? 5 : radius,
+            strength: isNaN(strength) ? 1.0 : strength,
+            threshold: isNaN(threshold) ? -0.5 : threshold
+          };
+        } else {
+          newType = 'gaussian';
+          console.log(chalk.bold.yellow('\n--- Cài Đặt Tham Số Gaussian Blur ---'));
+          const sigStr = await askQuestion('sigma - Độ mịn làm mờ (Số thực dương) [Mặc định: 20]: ');
+          const sigma = sigStr ? parseFloat(sigStr) : 20;
+          const stepStr = await askQuestion('steps - Số bước lặp (Số nguyên 1-10) [Mặc định: 3]: ');
+          const steps = stepStr ? parseInt(stepStr, 10) : 3;
+
+          newParams = { 
+            sigma: isNaN(sigma) || sigma <= 0 ? 20 : sigma, 
+            steps: isNaN(steps) || steps <= 0 ? 3 : steps 
+          };
+        }
+
+        const newBlur: BlurConfig = { type: newType, params: newParams };
+        if (saveConfig(dimensions, replacer, newBlur)) {
+          console.log(chalk.green(`\n[OK] Đã lưu cấu hình làm mờ ${newType.toUpperCase()} thành công!`));
+        }
+        break;
+      }
+      await askQuestion('\nẤn enter để tiếp tục...');
     }
   }
   process.exit(0);

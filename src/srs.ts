@@ -138,6 +138,21 @@ async function main() {
       continue;
     }
 
+    // Clone the original file if shouldRename is true
+    if (shouldRename) {
+      const ext = path.extname(filePath);
+      const base = path.basename(filePath, ext);
+      const clonedName = `${currentDate}_${gameName}_${owner}_${replacer}_${base}${ext}`;
+      const clonedPath = path.join(path.dirname(filePath), clonedName).replace(/\\/g, '/');
+
+      try {
+        fs.copyFileSync(filePath, clonedPath);
+        console.log(chalk.green(`  [OK] Đã sao chép file gốc sang: ${clonedName}`));
+      } catch (err: any) {
+        console.error(chalk.red(`  [Lỗi] Không thể sao chép file gốc: ${err.message}`));
+      }
+    }
+
     for (const target of targets) {
       const ext = path.extname(filePath);
       const base = path.basename(filePath, ext);
