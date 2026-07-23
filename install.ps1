@@ -170,6 +170,14 @@ try {
             $rshShortcut.Description = "Show Auto-Resize User Guide"
             $rshShortcut.WorkingDirectory = $env:USERPROFILE
             $rshShortcut.Save()
+
+            # 4. Shortcut for rsi (Resize Install)
+            $rsiShortcut = $wsh.CreateShortcut([System.IO.Path]::Combine($programsPath, "Resize Install (rsi).lnk"))
+            $rsiShortcut.TargetPath = "powershell.exe"
+            $rsiShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command rsi"
+            $rsiShortcut.Description = "Run Auto-Resize Installer / Updater"
+            $rsiShortcut.WorkingDirectory = $env:USERPROFILE
+            $rsiShortcut.Save()
         }
     } catch {
         Write-Host "Warning: Could not create Start Menu shortcuts: $_" -ForegroundColor Yellow

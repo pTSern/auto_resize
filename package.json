@@ -10,7 +10,8 @@
     "rs": "./dist/cli.js",
     "srs": "./dist/srs.js",
     "rss": "./dist/setting.js",
-    "rsh": "./dist/rsh.js"
+    "rsh": "./dist/rsh.js",
+    "rsi": "./dist/rsi.js"
   },
   "scripts": {
     "build": "tsc",
