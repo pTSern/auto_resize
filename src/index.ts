@@ -183,7 +183,6 @@ export async function resizeVideo(
 ): Promise<void> {
   const inputPath = options.inputPath.replace(/\\/g, '/');
   const outputPath = options.outputPath.replace(/\\/g, '/');
-  const { blurSigma } = options;
   const metadata = await getVideoMetadata(inputPath);
   const target = calculateTargetDimensions({ ...options, inputPath, outputPath }, metadata);
 
@@ -192,34 +191,61 @@ export async function resizeVideo(
 
   // Load blur configuration
   const { blur } = loadGlobalConfig();
+  
+  // 1. Resolve target blur type
+  let targetBlurType: 'gaussian' | 'box' | 'smart' = 'gaussian';
+  if (options.blurOverrideType) {
+    targetBlurType = options.blurOverrideType;
+  } else if (blur && blur.type) {
+    targetBlurType = blur.type;
+  }
+
+  // 2. Resolve blur parameters
   let blurFilter = 'gblur';
   let blurOpts: any = { sigma: 20, steps: 3 };
 
-  if (blurSigma !== undefined) {
-    // Explicit CLI override
+  if (targetBlurType === 'gaussian') {
     blurFilter = 'gblur';
-    blurOpts = { sigma: blurSigma, steps: 3 };
-  } else if (blur && blur.type && blur.params) {
-    if (blur.type === 'gaussian') {
-      blurFilter = 'gblur';
-      blurOpts = {
-        sigma: typeof blur.params.sigma === 'number' ? blur.params.sigma : 20,
-        steps: typeof blur.params.steps === 'number' ? blur.params.steps : 3
-      };
-    } else if (blur.type === 'box') {
-      blurFilter = 'boxblur';
-      blurOpts = {
-        lr: typeof blur.params.radius === 'number' ? blur.params.radius : 20,
-        lp: typeof blur.params.power === 'number' ? blur.params.power : 2
-      };
-    } else if (blur.type === 'smart') {
-      blurFilter = 'smartblur';
-      blurOpts = {
-        lr: typeof blur.params.radius === 'number' ? blur.params.radius : 5,
-        ls: typeof blur.params.strength === 'number' ? blur.params.strength : 1.0,
-        lt: typeof blur.params.threshold === 'number' ? blur.params.threshold : -0.5
-      };
+    let sigma = 20;
+    let steps = 3;
+
+    if (options.blurOverrideParams && options.blurOverrideParams.length > 0) {
+      sigma = isNaN(options.blurOverrideParams[0]) ? 20 : options.blurOverrideParams[0];
+      steps = isNaN(options.blurOverrideParams[1]) ? 3 : options.blurOverrideParams[1];
+    } else if (blur && blur.type === 'gaussian' && blur.params) {
+      sigma = typeof blur.params.sigma === 'number' ? blur.params.sigma : 20;
+      steps = typeof blur.params.steps === 'number' ? blur.params.steps : 3;
     }
+    blurOpts = { sigma, steps };
+  } else if (targetBlurType === 'box') {
+    blurFilter = 'boxblur';
+    let radius = 20;
+    let power = 2;
+
+    if (options.blurOverrideParams && options.blurOverrideParams.length > 0) {
+      radius = isNaN(options.blurOverrideParams[0]) ? 20 : options.blurOverrideParams[0];
+      power = isNaN(options.blurOverrideParams[1]) ? 2 : options.blurOverrideParams[1];
+    } else if (blur && blur.type === 'box' && blur.params) {
+      radius = typeof blur.params.radius === 'number' ? blur.params.radius : 20;
+      power = typeof blur.params.power === 'number' ? blur.params.power : 2;
+    }
+    blurOpts = { lr: radius, lp: power };
+  } else if (targetBlurType === 'smart') {
+    blurFilter = 'smartblur';
+    let radius = 5;
+    let strength = 1.0;
+    let threshold = -0.5;
+
+    if (options.blurOverrideParams && options.blurOverrideParams.length > 0) {
+      radius = isNaN(options.blurOverrideParams[0]) ? 5 : options.blurOverrideParams[0];
+      strength = isNaN(options.blurOverrideParams[1]) ? 1.0 : options.blurOverrideParams[1];
+      threshold = isNaN(options.blurOverrideParams[2]) ? -0.5 : options.blurOverrideParams[2];
+    } else if (blur && blur.type === 'smart' && blur.params) {
+      radius = typeof blur.params.radius === 'number' ? blur.params.radius : 5;
+      strength = typeof blur.params.strength === 'number' ? blur.params.strength : 1.0;
+      threshold = typeof blur.params.threshold === 'number' ? blur.params.threshold : -0.5;
+    }
+    blurOpts = { lr: radius, ls: strength, lt: threshold };
   }
 
   // Build the filter description array for fluent-ffmpeg complexFilter:

@@ -189,8 +189,7 @@ async function main() {
         outputPath: outPath,
         aspectRatio: 'custom',
         width: target.w,
-        height: target.h,
-        blurSigma: 20
+        height: target.h
       };
 
       const targetDim = calculateTargetDimensions(jobOpts, metadata);

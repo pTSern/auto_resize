@@ -4,7 +4,8 @@ export interface ResizeOptions {
   aspectRatio?: '1:1' | '9:16' | '16:9' | 'custom';
   width?: number;
   height?: number;
-  blurSigma?: number; // Sigma value for Gaussian blur filter (default: 20)
+  blurOverrideType?: 'gaussian' | 'box' | 'smart';
+  blurOverrideParams?: number[];
 }
 
 export interface Dimension {

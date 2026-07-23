@@ -66,7 +66,8 @@ cli
   .option('-r, --ratio <ratio>', 'Target aspect ratio: "1:1", "9:16", or "16:9" (defaults to loading config presets if omitted)')
   .option('--width <width>', 'Custom target width in pixels (requires --height)')
   .option('--height <height>', 'Custom target height in pixels (requires --width)')
-  .option('--blur <sigma>', 'Gaussian blur sigma value override (falls back to config if omitted)')
+  .option('--blur <type>', 'Blur type override (0/gaussian, 1/box, 2/smart)')
+  .option('--prag <params...>', 'Override parameters for the selected blur (e.g. 30 5)')
   .action(async (input, options) => {
     try {
       let filesToProcess: string[] = [];
@@ -109,7 +110,37 @@ cli
 
       const customW = options.width ? parseInt(options.width, 10) : undefined;
       const customH = options.height ? parseInt(options.height, 10) : undefined;
-      const blurSigma = options.blur ? parseFloat(options.blur) : undefined;
+
+      // Parse blur override type
+      let blurOverrideType: 'gaussian' | 'box' | 'smart' | undefined = undefined;
+      if (options.blur !== undefined && options.blur !== null) {
+        const bVal = String(options.blur).toLowerCase().trim();
+        if (bVal === '0' || bVal === 'gaussian') {
+          blurOverrideType = 'gaussian';
+        } else if (bVal === '1' || bVal === 'box') {
+          blurOverrideType = 'box';
+        } else if (bVal === '2' || bVal === 'smart') {
+          blurOverrideType = 'smart';
+        } else {
+          // If they typed something else like a number for backward compatibility (e.g. --blur 30),
+          // check if it is numeric. If so, treat it as Gaussian and put it into override params!
+          const parsedNum = parseFloat(bVal);
+          if (!isNaN(parsedNum)) {
+            blurOverrideType = 'gaussian';
+            options.prag = options.prag || [];
+            options.prag.unshift(parsedNum);
+          } else {
+            blurOverrideType = 'gaussian';
+          }
+        }
+      }
+
+      // Parse blur override parameters array
+      let blurOverrideParams: number[] | undefined = undefined;
+      if (options.prag) {
+        const rawPrag = Array.isArray(options.prag) ? options.prag : [options.prag];
+        blurOverrideParams = rawPrag.map((val: any) => parseFloat(val)).filter((n: number) => !isNaN(n));
+      }
 
       if ((customW && !customH) || (!customW && customH)) {
         console.error(chalk.red(`\nError: Both --width and --height must be provided for custom resizing.`));
@@ -269,7 +300,8 @@ cli
             aspectRatio: 'custom',
             width: customW,
             height: customH,
-            blurSigma
+            blurOverrideType,
+            blurOverrideParams
           };
           jobs.push({ options: jobOpts, label: `${customW}x${customH} (custom)` });
         } else if (options.ratio) {
@@ -279,7 +311,8 @@ cli
             inputPath: filePath,
             outputPath: '', // Temporarily empty, will fill below
             aspectRatio: ratio,
-            blurSigma
+            blurOverrideType,
+            blurOverrideParams
           };
           const targetDim = calculateTargetDimensions(jobOpts, metadata);
           jobOpts.outputPath = buildOutputPath(targetDim.width, targetDim.height);
@@ -299,7 +332,8 @@ cli
                 inputPath: filePath,
                 outputPath: '', // Will fill below
                 aspectRatio: ratio,
-                blurSigma
+                blurOverrideType,
+                blurOverrideParams
               };
               const targetDim = calculateTargetDimensions(jobOpts, metadata);
               jobOpts.outputPath = buildOutputPath(targetDim.width, targetDim.height);
@@ -311,7 +345,8 @@ cli
                 aspectRatio: 'custom',
                 width: w,
                 height: h,
-                blurSigma
+                blurOverrideType,
+                blurOverrideParams
               };
               label = `${w}x${h} (custom)`;
             }
@@ -331,7 +366,10 @@ cli
         console.log(`${chalk.cyan('File gốc:')}       ${originName}`);
         console.log(`${chalk.cyan('Cấu hình:')}       ${job.label}`);
         console.log(`${chalk.cyan('File đầu ra:')}    ${job.options.outputPath}`);
-        console.log(`${chalk.cyan('Hiệu ứng Blur:')}   ${blurSigma !== undefined ? 'Gaussian (sigma=' + blurSigma + ')' : 'Theo cấu hình hệ thống (Config default)'}`);
+        const printBlur = blurOverrideType 
+          ? `${blurOverrideType.toUpperCase()} (params: [${blurOverrideParams?.join(', ') || ''}])`
+          : 'Theo cấu hình hệ thống (Config default)';
+        console.log(`${chalk.cyan('Hiệu ứng Blur:')}   ${printBlur}`);
         console.log(chalk.bold.blue('----------------------------------------\n'));
 
         // Ensure directory of output path exists
