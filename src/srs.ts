@@ -107,6 +107,67 @@ async function main() {
     owner = sanitizeFilename(rawOwner) || 'UnknownOwner';
   }
 
+  // Ask if they want to change blur setting
+  const blurAnswer = (await askQuestion(chalk.yellow('Có muốn thay đổi cài đặt làm mờ (Blur) không ( y/n ) [n]: '))).toLowerCase();
+  
+  let tempBlurType: 'gaussian' | 'box' | 'smart' | undefined = undefined;
+  let tempBlurParams: number[] | undefined = undefined;
+
+  if (yesOptions.includes(blurAnswer)) {
+    console.clear();
+    console.log(chalk.cyan('===================================================='));
+    console.log(chalk.bold.cyan('        TÙY CHỈNH HIỆU ỨNG LÀM MỜ (TẠM THỜI)'));
+    console.log(chalk.cyan('===================================================='));
+    console.log('Chọn hiệu ứng làm mờ mới cho lượt chạy này:');
+    console.log('  [0] Gaussian Blur (Mịn, chất lượng cao nhất)');
+    console.log('  [1] Box Blur (Làm mờ khối - Nhanh, nhẹ)');
+    console.log('  [2] Smart Blur (Làm mờ thông minh - Giữ sắc nét biên)');
+    console.log(chalk.cyan('----------------------------------------------------'));
+    
+    const blurChoice = await askQuestion(chalk.cyan('Chọn loại làm mờ [0-2] [Mặc định: 0]: '));
+    
+    if (blurChoice === '1') {
+      tempBlurType = 'box';
+      console.log(chalk.bold.yellow('\n--- Cài Đặt Tham Số Box Blur ---'));
+      const radStr = await askQuestion('radius - Bán kính làm mờ (Số thực dương) [Mặc định: 20]: ');
+      const radius = radStr ? parseFloat(radStr) : 20;
+      const powStr = await askQuestion('power - Số lần lặp làm mờ (Số nguyên 1-5) [Mặc định: 2]: ');
+      const power = powStr ? parseInt(powStr, 10) : 2;
+
+      tempBlurParams = [
+        isNaN(radius) || radius <= 0 ? 20 : radius,
+        isNaN(power) || power <= 0 ? 2 : power
+      ];
+    } else if (blurChoice === '2') {
+      tempBlurType = 'smart';
+      console.log(chalk.bold.yellow('\n--- Cài Đặt Tham Số Smart Blur ---'));
+      const radStr = await askQuestion('radius - Bán kính lân cận (Số thực dương) [Mặc định: 5]: ');
+      const radius = radStr ? parseFloat(radStr) : 5;
+      const strStr = await askQuestion('strength - Độ mạnh làm mờ (Số thực) [Mặc định: 1.0]: ');
+      const strength = strStr ? parseFloat(strStr) : 1.0;
+      const thrStr = await askQuestion('threshold - Ngưỡng lọc chi tiết (-30 đến 30) [Mặc định: -0.5]: ');
+      const threshold = thrStr ? parseFloat(thrStr) : -0.5;
+
+      tempBlurParams = [
+        isNaN(radius) || radius <= 0 ? 5 : radius,
+        isNaN(strength) ? 1.0 : strength,
+        isNaN(threshold) ? -0.5 : threshold
+      ];
+    } else {
+      tempBlurType = 'gaussian';
+      console.log(chalk.bold.yellow('\n--- Cài Đặt Tham Số Gaussian Blur ---'));
+      const sigStr = await askQuestion('sigma - Độ mịn làm mờ (Số thực dương) [Mặc định: 20]: ');
+      const sigma = sigStr ? parseFloat(sigStr) : 20;
+      const stepStr = await askQuestion('steps - Số bước lặp (Số nguyên 1-10) [Mặc định: 3]: ');
+      const steps = stepStr ? parseInt(stepStr, 10) : 3;
+
+      tempBlurParams = [
+        isNaN(sigma) || sigma <= 0 ? 20 : sigma,
+        isNaN(steps) || steps <= 0 ? 3 : steps
+      ];
+    }
+  }
+
   const sizeAnswer = await askQuestion(chalk.yellow('Kích thước muốn render (1x1, 16x9, all) [all]: '));
   interface TargetDim {
     w: number;
@@ -189,7 +250,9 @@ async function main() {
         outputPath: outPath,
         aspectRatio: 'custom',
         width: target.w,
-        height: target.h
+        height: target.h,
+        blurOverrideType: tempBlurType,
+        blurOverrideParams: tempBlurParams
       };
 
       const targetDim = calculateTargetDimensions(jobOpts, metadata);
