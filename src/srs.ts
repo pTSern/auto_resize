@@ -6,7 +6,7 @@ import fs from 'fs';
 import readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
-import { resizeVideo, getVideoMetadata, calculateTargetDimensions, loadGlobalConfig, getFractionLabel } from './index.js';
+import { resizeVideo, getVideoMetadata, calculateTargetDimensions, loadGlobalConfig, getFractionLabel, CONFIG_PATH } from './index.js';
 import { ResizeOptions } from './types.js';
 
 // Open native WinForms File selector dialog allowing multi-file selection
@@ -79,7 +79,7 @@ async function main() {
   const { dimensions: configDims, replacer } = loadGlobalConfig();
 
   // Determine duplicated fractions in global configuration
-  const fractionCounts: Record<string, number> = {};
+  let fractionCounts: Record<string, number> = {};
   for (const dim of configDims) {
     const frac = getFractionLabel(dim.w, dim.h);
     fractionCounts[frac] = (fractionCounts[frac] || 0) + 1;
@@ -168,20 +168,86 @@ async function main() {
     }
   }
 
-  const sizeAnswer = await askQuestion(chalk.yellow('Kích thước muốn render (1x1, 16x9, all) [all]: '));
+  // Get dimensions from global config
+  const config = loadGlobalConfig();
+  
+  // Format preset options for asking
+  const configLabels = config.dimensions.map(d => `${d.w}x${d.h}`).join(', ');
+  const promptMessage = chalk.yellow(`Kích thước muốn render (${configLabels}, all) [all]: `);
+  const sizeAnswer = await askQuestion(promptMessage);
+
   interface TargetDim {
     w: number;
     h: number;
     label: string;
   }
-  let targets: TargetDim[] = [
-    { w: 1080, h: 1080, label: '1080x1080' },
-    { w: 1920, h: 1080, label: '1920x1080' }
-  ];
-  if (sizeAnswer === '1x1' || sizeAnswer === '1:1') {
-    targets = [{ w: 1080, h: 1080, label: '1080x1080' }];
-  } else if (sizeAnswer === '16x9') {
-    targets = [{ w: 1920, h: 1080, label: '1920x1080' }];
+  let targets: TargetDim[] = [];
+
+  const rawAnswer = sizeAnswer.trim().toLowerCase();
+  if (rawAnswer === '' || rawAnswer === 'all') {
+    targets = config.dimensions.map(d => ({ w: d.w, h: d.h, label: `${d.w}x${d.h}` }));
+  } else {
+    // Split user input by comma, filter empty values
+    const parts = rawAnswer.split(',').map(s => s.trim()).filter(Boolean);
+    
+    for (const part of parts) {
+      let w: number;
+      let h: number;
+
+      // Handle simple fraction aliases if inputted (e.g. 1x1, 16x9)
+      if (part === '1x1' || part === '1:1') {
+        w = 1080;
+        h = 1080;
+      } else if (part === '16x9' || part === '16:9') {
+        w = 1920;
+        h = 1080;
+      } else {
+        const match = part.match(/^(\d+)[x:](\d+)$/);
+        if (match) {
+          w = parseInt(match[1], 10);
+          h = parseInt(match[2], 10);
+        } else {
+          console.log(chalk.red(`[Cảnh báo] Kích thước không hợp lệ: "${part}". Bỏ qua.`));
+          continue;
+        }
+      }
+
+      // Check if w and h are valid numbers
+      if (isNaN(w) || isNaN(h) || w <= 0 || h <= 0) {
+        console.log(chalk.red(`[Cảnh báo] Kích thước phải là số nguyên dương: "${part}". Bỏ qua.`));
+        continue;
+      }
+
+      targets.push({ w, h, label: `${w}x${h}` });
+
+      // Check if this dimension exists in the config.dimensions array
+      const exists = config.dimensions.some(d => d.w === w && d.h === h);
+      if (!exists) {
+        const saveAnswer = (await askQuestion(chalk.cyan(`Phát hiện kích thước mới: "${w}x${h}", có muốn lưu lại vào cấu hình không? (y/n) [n]: `))).toLowerCase();
+        if (yesOptions.includes(saveAnswer)) {
+          config.dimensions.push({ w, h });
+          // Save updated configuration back to config file
+          try {
+            fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+            console.log(chalk.green(`Đã lưu kích thước ${w}x${h} vào cấu hình.`));
+          } catch (err: any) {
+            console.log(chalk.red(`Không thể lưu cấu hình: ${err.message}`));
+          }
+        }
+      }
+    }
+  }
+
+  if (targets.length === 0) {
+    console.log(chalk.red('Không có kích thước render hợp lệ nào được chọn. Đang thoát.'));
+    process.exit(0);
+  }
+
+  // Recalculate fractionCounts using the targets selected for this run
+  fractionCounts = {};
+  for (const t of targets) {
+    const frac = getFractionLabel(t.w, t.h);
+    fractionCounts[frac] = (fractionCounts[frac] || 0) + 1;
   }
 
   console.log(chalk.cyan(`\nTiến hành resize ${files.length} video .mp4...\n`));
