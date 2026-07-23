@@ -178,6 +178,14 @@ try {
             $rsiShortcut.Description = "Run Auto-Resize Installer / Updater"
             $rsiShortcut.WorkingDirectory = $env:USERPROFILE
             $rsiShortcut.Save()
+
+            # 5. Shortcut for rs (Auto Resize)
+            $rsShortcut = $wsh.CreateShortcut([System.IO.Path]::Combine($programsPath, "Auto Resize (rs).lnk"))
+            $rsShortcut.TargetPath = "powershell.exe"
+            $rsShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -NoExit -Command rs"
+            $rsShortcut.Description = "Run Auto-Resize Processing Engine"
+            $rsShortcut.WorkingDirectory = $env:USERPROFILE
+            $rsShortcut.Save()
         }
     } catch {
         Write-Host "Warning: Could not create Start Menu shortcuts: $_" -ForegroundColor Yellow
