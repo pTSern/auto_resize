@@ -9,6 +9,7 @@ import os from 'os';
 import readline from 'readline';
 import { resizeVideo, getVideoMetadata, calculateTargetDimensions, loadGlobalConfig, getFractionLabel } from './index.js';
 import { ResizeOptions } from './types.js';
+import { printGuide } from './rsh.js';
 
 /**
  * Helper to prompt the user for input in the terminal.
@@ -403,7 +404,10 @@ cli
     }
   });
 
-cli.help();
+cli.help(() => {
+  printGuide();
+  process.exit(0);
+});
 cli.version('1.0.0');
 
 cli.parse();

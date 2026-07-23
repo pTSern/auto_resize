@@ -162,6 +162,14 @@ try {
             $rssShortcut.Description = "Manage Auto-Resize Target Resolutions"
             $rssShortcut.WorkingDirectory = $env:USERPROFILE
             $rssShortcut.Save()
+
+            # 3. Shortcut for rsh (Resize Help)
+            $rshShortcut = $wsh.CreateShortcut([System.IO.Path]::Combine($programsPath, "Resize Help (rsh).lnk"))
+            $rshShortcut.TargetPath = "powershell.exe"
+            $rshShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -NoExit -Command rsh"
+            $rshShortcut.Description = "Show Auto-Resize User Guide"
+            $rshShortcut.WorkingDirectory = $env:USERPROFILE
+            $rshShortcut.Save()
         }
     } catch {
         Write-Host "Warning: Could not create Start Menu shortcuts: $_" -ForegroundColor Yellow
@@ -173,6 +181,7 @@ try {
     Write-Host "   auto_resize <video_path> (Or 'rs')" -ForegroundColor Yellow
     Write-Host "   srs (To open the File browser popup dialog)" -ForegroundColor Yellow
     Write-Host "   rss (To manage custom target dimensions)" -ForegroundColor Yellow
+    Write-Host "   rsh (To view the Vietnamese user guide)" -ForegroundColor Yellow
     Write-Host "====================================================" -ForegroundColor Green
 
 } catch {
