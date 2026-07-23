@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execSync } from 'child_process';
 import ffmpeg from './ffmpeg.js';
 import { ResizeOptions, Dimension } from './types.js';
 
@@ -301,29 +302,92 @@ export async function resizeVideo(
     }
   ];
 
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .complexFilter(filters)
-      .outputOptions([
+  return new Promise<void>((resolve, reject) => {
+    const runFfmpeg = (encoder: string) => {
+      const isCpu = encoder === 'libx264';
+      const outputOpts = [
         '-map [outv]',       // map the video from filter output
         '-map 0:a?',         // map audio if it exists in input (optional)
         '-c:a aac',          // encode audio using AAC
-        '-c:v libx264',      // encode video using H.264
-        '-pix_fmt yuv420p',  // maximum compatibility pixel format
-        '-preset medium'     // balanced speed/quality preset
-      ])
-      .output(outputPath)
-      .on('progress', (progress) => {
-        if (onProgress && progress.percent !== undefined) {
-          onProgress(Math.max(0, Math.min(100, progress.percent)));
-        }
-      })
-      .on('end', () => {
-        resolve();
-      })
-      .on('error', (err) => {
-        reject(new Error(`FFmpeg error: ${err.message}`));
-      })
-      .run();
+        `-c:v ${encoder}`,   // encode video using selected HW/SW encoder
+        '-pix_fmt yuv420p'   // maximum compatibility pixel format
+      ];
+
+      // Add preset parameter depending on encoder compatibility
+      if (isCpu) {
+        outputOpts.push('-preset medium');
+      } else if (encoder === 'h264_nvenc') {
+        outputOpts.push('-preset p4'); // NVENC specific preset
+      } else {
+        outputOpts.push('-preset medium');
+      }
+
+      ffmpeg(inputPath)
+        .complexFilter(filters)
+        .outputOptions(outputOpts)
+        .output(outputPath)
+        .on('progress', (progress) => {
+          if (onProgress && progress.percent !== undefined) {
+            onProgress(Math.max(0, Math.min(100, progress.percent)));
+          }
+        })
+        .on('end', () => {
+          resolve();
+        })
+        .on('error', (err) => {
+          // If hardware encoding fails, automatically fallback to CPU
+          if (!isCpu) {
+            console.warn(`\n[Cảnh báo] Render phần cứng bằng ${encoder} thất bại. Đang tự động chuyển sang CPU (libx264)...`);
+            runFfmpeg('libx264');
+          } else {
+            reject(new Error(`FFmpeg error: ${err.message}`));
+          }
+        })
+        .run();
+    };
+
+    const initialEncoder = getHardwareEncoder();
+    if (initialEncoder !== 'libx264') {
+      console.log(`  [GPU] Phát hiện GPU tương thích. Sử dụng bộ mã hóa phần cứng: ${initialEncoder}`);
+    }
+    runFfmpeg(initialEncoder);
   });
+}
+
+let cachedEncoder: string | null = null;
+
+/**
+ * Detects matching Windows GPU video controllers to retrieve available H264 hardware encoders
+ */
+export function getHardwareEncoder(): string {
+  if (cachedEncoder !== null) {
+    return cachedEncoder;
+  }
+
+  // Default fallback is CPU software encoder
+  cachedEncoder = 'libx264';
+
+  try {
+    const output = execSync('wmic path win32_VideoController get name', { stdio: ['pipe', 'pipe', 'ignore'] }).toString().toLowerCase();
+    if (output.includes('nvidia')) {
+      cachedEncoder = 'h264_nvenc';
+    } else if (output.includes('amd') || output.includes('radeon')) {
+      cachedEncoder = 'h264_amf';
+    } else if (output.includes('intel')) {
+      cachedEncoder = 'h264_qsv';
+    }
+  } catch (e) {
+    try {
+      const outputPs = execSync('powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"', { stdio: ['pipe', 'pipe', 'ignore'] }).toString().toLowerCase();
+      if (outputPs.includes('nvidia')) {
+        cachedEncoder = 'h264_nvenc';
+      } else if (outputPs.includes('amd') || outputPs.includes('radeon')) {
+        cachedEncoder = 'h264_amf';
+      } else if (outputPs.includes('intel')) {
+        cachedEncoder = 'h264_qsv';
+      }
+    } catch (pe) {}
+  }
+
+  return cachedEncoder;
 }
