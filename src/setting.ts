@@ -18,6 +18,7 @@ interface GlobalConfig {
   demensions?: Dimension[];
   replacer?: string;
   blur?: BlurConfig;
+  exposure?: number;
 }
 
 interface BlurConfig {
@@ -29,6 +30,7 @@ interface LoadedConfig {
   dimensions: Dimension[];
   replacer: string;
   blur: BlurConfig;
+  exposure: number;
 }
 
 function loadConfig(): LoadedConfig {
@@ -44,11 +46,12 @@ function loadConfig(): LoadedConfig {
       steps: 3
     }
   };
+  const defaultExposure = 0.0;
 
   if (!fs.existsSync(CONFIG_PATH)) {
-    const defaultConfig = { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
+    const defaultConfig = { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur, exposure: defaultExposure };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
+    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur, exposure: defaultExposure };
   }
 
   try {
@@ -57,6 +60,7 @@ function loadConfig(): LoadedConfig {
     const list = parsed.dimensions || parsed.demensions || defaultDimensions;
     const replacer = parsed.replacer || defaultReplacer;
     const blur = parsed.blur || defaultBlur;
+    const exposure = typeof parsed.exposure === 'number' ? parsed.exposure : defaultExposure;
     
     // Migrate legacy fractional ratios to absolute pixel sizes automatically
     let migrated = false;
@@ -66,20 +70,20 @@ function loadConfig(): LoadedConfig {
       if (dim.w === 9 && dim.h === 16) { migrated = true; return { w: 1080, h: 1920 }; }
       return dim;
     });
-    if (migrated || !parsed.replacer || !parsed.blur) {
-      saveConfig(updatedList, replacer, blur);
+    if (migrated || !parsed.replacer || !parsed.blur || parsed.exposure === undefined) {
+      saveConfig(updatedList, replacer, blur, exposure);
     }
-    return { dimensions: updatedList, replacer, blur };
+    return { dimensions: updatedList, replacer, blur, exposure };
   } catch (err) {
     console.log(chalk.red('Error reading config file, resetting to defaults.'));
   }
 
-  return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
+  return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur, exposure: defaultExposure };
 }
 
-function saveConfig(dimensions: Dimension[], replacer: string, blur: BlurConfig): boolean {
+function saveConfig(dimensions: Dimension[], replacer: string, blur: BlurConfig, exposure: number): boolean {
   try {
-    const config = { dimensions, replacer, blur };
+    const config = { dimensions, replacer, blur, exposure };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
     return true;
   } catch (err: any) {
@@ -102,7 +106,7 @@ function askQuestion(query: string): Promise<string> {
 async function menuLoop() {
   while (true) {
     console.clear();
-    const { dimensions, replacer, blur } = loadConfig();
+    const { dimensions, replacer, blur, exposure } = loadConfig();
     
     console.log(chalk.cyan('===================================================='));
     console.log(chalk.bold.cyan('        CẤU HÌNH AUTO RESIZE VIDEO (.json)'));
@@ -123,10 +127,11 @@ async function menuLoop() {
     console.log(chalk.yellow('  [D] Xóa kích thước (Delete)'));
     console.log(chalk.yellow(`  [R] Thay đổi chuỗi thay thế (Replacer) [Hiện tại: "${replacer}"]`));
     console.log(chalk.yellow(`  [B] Cài đặt hiệu ứng làm mờ (Blur) [Hiện tại: ${blur.type.toUpperCase()}]`));
+    console.log(chalk.yellow(`  [E] Cài đặt phơi sáng nền (Exposure) [Hiện tại: ${exposure} EV]`));
     console.log(chalk.yellow('  [Q] Thoát (Quit)'));
     console.log(chalk.cyan('===================================================='));
 
-    const choice = (await askQuestion(chalk.cyan('Nhập lựa chọn của bạn (A/D/R/B/Q): '))).toUpperCase();
+    const choice = (await askQuestion(chalk.cyan('Nhập lựa chọn của bạn (A/D/R/B/E/Q): '))).toUpperCase();
 
     if (choice === 'Q' || choice === '') {
       console.log(chalk.green('Tạm biệt!'));
@@ -156,7 +161,7 @@ async function menuLoop() {
       }
 
       dimensions.push({ w, h });
-      if (saveConfig(dimensions, replacer, blur)) {
+      if (saveConfig(dimensions, replacer, blur, exposure)) {
         console.log(chalk.green(`\n[OK] Đã thêm kích thước ${w}x${h} thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
@@ -179,7 +184,7 @@ async function menuLoop() {
       }
 
       const removed = dimensions.splice(idx - 1, 1)[0];
-      if (saveConfig(dimensions, replacer, blur)) {
+      if (saveConfig(dimensions, replacer, blur, exposure)) {
         console.log(chalk.green(`\n[OK] Đã xóa kích thước ${removed.w}x${removed.h} thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
@@ -193,7 +198,7 @@ async function menuLoop() {
         await askQuestion('');
         continue;
       }
-      if (saveConfig(dimensions, newReplacer, blur)) {
+      if (saveConfig(dimensions, newReplacer, blur, exposure)) {
         console.log(chalk.green(`\n[OK] Đã đổi chuỗi thay thế sang "${newReplacer}" thành công! Ấn enter để tiếp tục.`));
       }
       await askQuestion('');
@@ -264,10 +269,22 @@ async function menuLoop() {
         }
 
         const newBlur: BlurConfig = { type: newType, params: newParams };
-        if (saveConfig(dimensions, replacer, newBlur)) {
+        if (saveConfig(dimensions, replacer, newBlur, exposure)) {
           console.log(chalk.green(`\n[OK] Đã lưu cấu hình làm mờ ${newType.toUpperCase()} thành công!`));
         }
         break;
+      }
+      await askQuestion('\nẤn enter để tiếp tục...');
+    }
+    else if (choice === 'E') {
+      console.log(chalk.bold.yellow('\n--- Cài Đặt Phơi Sáng Nền (Exposure) ---'));
+      console.log(`Giá trị EV phơi sáng hiện tại: ${exposure} EV`);
+      console.log('Nhập giá trị từ -3.0 đến 3.0 (ví dụ: -1.0 để làm tối 1 stop / 50% ánh sáng, 0.0 để giữ nguyên).');
+      const expStr = await askQuestion(chalk.yellow('Nhập độ phơi sáng EV mới [Mặc định: 0.0]: '));
+      const newExp = expStr ? parseFloat(expStr) : 0.0;
+      const validExp = isNaN(newExp) ? 0.0 : Math.max(-3.0, Math.min(3.0, newExp));
+      if (saveConfig(dimensions, replacer, blur, validExp)) {
+        console.log(chalk.green(`\n[OK] Đã đổi độ phơi sáng nền sang ${validExp} EV thành công!`));
       }
       await askQuestion('\nẤn enter để tiếp tục...');
     }

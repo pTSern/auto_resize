@@ -168,6 +168,16 @@ async function main() {
     }
   }
 
+  // Ask if they want to change background exposure setting
+  const expAnswer = (await askQuestion(chalk.yellow('Có muốn thay đổi phơi sáng nền (Exposure) không ( y/n ) [n]: '))).toLowerCase();
+  let tempExposure: number | undefined = undefined;
+  if (yesOptions.includes(expAnswer)) {
+    console.log(chalk.bold.yellow('\n--- Cài Đặt Phơi Sáng Nền (Exposure) ---'));
+    const expStr = await askQuestion('Nhập độ phơi sáng EV (-3.0 đến 3.0, ví dụ: -1.0 làm tối 50%) [Mặc định: 0.0]: ');
+    const parsedExp = expStr ? parseFloat(expStr) : 0.0;
+    tempExposure = isNaN(parsedExp) ? 0.0 : Math.max(-3.0, Math.min(3.0, parsedExp));
+  }
+
   // Get dimensions from global config
   const config = loadGlobalConfig();
   
@@ -318,7 +328,8 @@ async function main() {
         width: target.w,
         height: target.h,
         blurOverrideType: tempBlurType,
-        blurOverrideParams: tempBlurParams
+        blurOverrideParams: tempBlurParams,
+        blurOverrideExposure: tempExposure
       };
 
       const targetDim = calculateTargetDimensions(jobOpts, metadata);

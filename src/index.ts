@@ -22,12 +22,14 @@ interface GlobalConfig {
   demensions?: ConfigDimension[];
   replacer?: string;
   blur?: BlurConfig;
+  exposure?: number;
 }
 
 export interface LoadedConfig {
   dimensions: ConfigDimension[];
   replacer: string;
   blur: BlurConfig;
+  exposure: number;
 }
 
 /**
@@ -55,17 +57,19 @@ export function loadGlobalConfig(): LoadedConfig {
       steps: 3
     }
   };
+  const defaultExposure = 0.0;
 
   if (!fs.existsSync(CONFIG_PATH)) {
     const defaultConfig = {
       dimensions: defaultDimensions,
       replacer: defaultReplacer,
-      blur: defaultBlur
+      blur: defaultBlur,
+      exposure: defaultExposure
     };
     try {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
     } catch (err: any) {}
-    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
+    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur, exposure: defaultExposure };
   }
 
   try {
@@ -74,6 +78,7 @@ export function loadGlobalConfig(): LoadedConfig {
     const list = parsed.dimensions || parsed.demensions || defaultDimensions;
     const replacer = parsed.replacer || defaultReplacer;
     const blur = parsed.blur || defaultBlur;
+    const exposure = typeof parsed.exposure === 'number' ? parsed.exposure : defaultExposure;
 
     // Migrate legacy fractional ratios to absolute pixel sizes automatically
     let migrated = false;
@@ -84,19 +89,19 @@ export function loadGlobalConfig(): LoadedConfig {
       return dim;
     });
 
-    if (migrated || !parsed.replacer || !parsed.blur) {
+    if (migrated || !parsed.replacer || !parsed.blur || parsed.exposure === undefined) {
       try {
         fs.writeFileSync(
           CONFIG_PATH,
-          JSON.stringify({ dimensions: updatedList, replacer, blur }, null, 2),
+          JSON.stringify({ dimensions: updatedList, replacer, blur, exposure }, null, 2),
           'utf-8'
         );
       } catch (e) {}
     }
 
-    return { dimensions: updatedList, replacer, blur };
+    return { dimensions: updatedList, replacer, blur, exposure };
   } catch (err: any) {
-    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur };
+    return { dimensions: defaultDimensions, replacer: defaultReplacer, blur: defaultBlur, exposure: defaultExposure };
   }
 }
 
@@ -249,13 +254,21 @@ export async function resizeVideo(
     blurOpts = { lr: radius, ls: strength, lt: threshold };
   }
 
+  // Load exposure configuration
+  const config = loadGlobalConfig();
+  const targetExposure = options.blurOverrideExposure !== undefined 
+    ? options.blurOverrideExposure 
+    : (config.exposure !== undefined ? config.exposure : 0.0);
+
   // Build the filter description array for fluent-ffmpeg complexFilter:
   // 1. bg_scale: scale input video so it's large enough to cover the target box completely
   // 2. bg_crop: crop the scaled background to fit the target width and height exactly
   // 3. bg_blur: apply the chosen blur to the cropped background
-  // 4. fg_scale: scale original input video to fit inside target box, keeping original aspect ratio
-  // 5. overlay: overlay fg centered on top of bg_blur
-  const filters = [
+  // 4. bg_dark (optional): adjust exposure EV of background
+  // 5. fg_scale: scale original input video to fit inside target box, keeping original aspect ratio
+  // 6. overlay: overlay fg centered on top of background
+  let bgOutput = 'bg_blur';
+  const filters: any[] = [
     {
       filter: 'scale',
       options: {
@@ -280,7 +293,22 @@ export async function resizeVideo(
       options: blurOpts,
       inputs: 'bg_crop',
       outputs: 'bg_blur'
-    },
+    }
+  ];
+
+  if (targetExposure !== 0) {
+    filters.push({
+      filter: 'exposure',
+      options: {
+        exposure: targetExposure
+      },
+      inputs: 'bg_blur',
+      outputs: 'bg_dark'
+    });
+    bgOutput = 'bg_dark';
+  }
+
+  filters.push(
     {
       filter: 'scale',
       options: {
@@ -297,10 +325,10 @@ export async function resizeVideo(
         x: '(W-w)/2',
         y: '(H-h)/2'
       },
-      inputs: ['bg_blur', 'fg_scale'],
+      inputs: [bgOutput, 'fg_scale'],
       outputs: 'outv'
     }
-  ];
+  );
 
   return new Promise<void>((resolve, reject) => {
     const runFfmpeg = (encoder: string) => {

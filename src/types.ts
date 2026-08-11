@@ -6,6 +6,7 @@ export interface ResizeOptions {
   height?: number;
   blurOverrideType?: 'gaussian' | 'box' | 'smart';
   blurOverrideParams?: number[];
+  blurOverrideExposure?: number;
 }
 
 export interface Dimension {

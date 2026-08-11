@@ -69,6 +69,7 @@ cli
   .option('--height <height>', 'Custom target height in pixels (requires --width)')
   .option('--blur <type>', 'Blur type override (0/gaussian, 1/box, 2/smart)')
   .option('--prag <params...>', 'Override parameters for the selected blur (e.g. 30 5)')
+  .option('-e, --exposure <EV>', 'Background exposure EV adjustment (-3.0 to 3.0, e.g. -1.0)')
   .action(async (input, options) => {
     try {
       let filesToProcess: string[] = [];
@@ -141,6 +142,15 @@ cli
       if (options.prag) {
         const rawPrag = Array.isArray(options.prag) ? options.prag : [options.prag];
         blurOverrideParams = rawPrag.map((val: any) => parseFloat(val)).filter((n: number) => !isNaN(n));
+      }
+
+      // Parse exposure override option
+      let blurOverrideExposure: number | undefined = undefined;
+      if (options.exposure !== undefined && options.exposure !== null) {
+        const parsedExp = parseFloat(String(options.exposure));
+        if (!isNaN(parsedExp)) {
+          blurOverrideExposure = Math.max(-3.0, Math.min(3.0, parsedExp));
+        }
       }
 
       if ((customW && !customH) || (!customW && customH)) {
@@ -239,8 +249,19 @@ cli
         }
       }
 
+      // Ask if they want to change background exposure setting
+      const expAnswer = (await askQuestion(chalk.yellow('Có muốn thay đổi phơi sáng nền (Exposure) không ( y/n ) [n]: '))).toLowerCase();
+      let tempExposure: number | undefined = undefined;
+      if (yesOptions.includes(expAnswer)) {
+        console.log(chalk.bold.yellow('\n--- Cài Đặt Phơi Sáng Nền (Exposure) ---'));
+        const expStr = await askQuestion('Nhập độ phơi sáng EV (-3.0 đến 3.0, ví dụ: -1.0 làm tối 50%) [Mặc định: 0.0]: ');
+        const parsedExp = expStr ? parseFloat(expStr) : 0.0;
+        tempExposure = isNaN(parsedExp) ? 0.0 : Math.max(-3.0, Math.min(3.0, parsedExp));
+      }
+
       const finalBlurType = tempBlurType || blurOverrideType;
       const finalBlurParams = tempBlurParams || blurOverrideParams;
+      const finalExposure = tempExposure !== undefined ? tempExposure : blurOverrideExposure;
 
       interface ConversionJob {
         options: ResizeOptions;
@@ -366,7 +387,8 @@ cli
             width: customW,
             height: customH,
             blurOverrideType: finalBlurType,
-            blurOverrideParams: finalBlurParams
+            blurOverrideParams: finalBlurParams,
+            blurOverrideExposure: finalExposure
           };
           jobs.push({ options: jobOpts, label: `${customW}x${customH} (custom)` });
         } else if (options.ratio) {
@@ -377,7 +399,8 @@ cli
             outputPath: '', // Temporarily empty, will fill below
             aspectRatio: ratio,
             blurOverrideType: finalBlurType,
-            blurOverrideParams: finalBlurParams
+            blurOverrideParams: finalBlurParams,
+            blurOverrideExposure: finalExposure
           };
           const targetDim = calculateTargetDimensions(jobOpts, metadata);
           jobOpts.outputPath = buildOutputPath(targetDim.width, targetDim.height);
@@ -398,7 +421,8 @@ cli
                 outputPath: '', // Will fill below
                 aspectRatio: ratio,
                 blurOverrideType: finalBlurType,
-                blurOverrideParams: finalBlurParams
+                blurOverrideParams: finalBlurParams,
+                blurOverrideExposure: finalExposure
               };
               const targetDim = calculateTargetDimensions(jobOpts, metadata);
               jobOpts.outputPath = buildOutputPath(targetDim.width, targetDim.height);
@@ -411,7 +435,8 @@ cli
                 width: w,
                 height: h,
                 blurOverrideType: finalBlurType,
-                blurOverrideParams: finalBlurParams
+                blurOverrideParams: finalBlurParams,
+                blurOverrideExposure: finalExposure
               };
               label = `${w}x${h} (custom)`;
             }
@@ -435,6 +460,10 @@ cli
           ? `${finalBlurType.toUpperCase()} (params: [${finalBlurParams?.join(', ') || ''}])`
           : 'Theo cấu hình hệ thống (Config default)';
         console.log(`${chalk.cyan('Hiệu ứng Blur:')}   ${printBlur}`);
+        const printExposure = finalExposure !== undefined 
+          ? `${finalExposure} EV`
+          : 'Theo cấu hình hệ thống (Config default)';
+        console.log(`${chalk.cyan('Phơi sáng nền:')}   ${printExposure}`);
         console.log(chalk.bold.blue('----------------------------------------\n'));
 
         // Ensure directory of output path exists

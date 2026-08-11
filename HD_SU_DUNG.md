@@ -46,6 +46,10 @@ Khi mở menu cài đặt, bạn sẽ thấy giao diện dòng lệnh gồm các
     1. **Gaussian Blur (Mặc định)**: Làm mờ Gauss - Rất mịn và chất lượng cao. Hỏi nhập độ mịn (`sigma`, mặc định `20`) và số bước lặp (`steps`, mặc định `3`).
     2. **Box Blur**: Làm mờ khối - Cực kì nhanh, nhẹ hơn nhưng hiệu ứng hơi ô vuông. Hỏi nhập bán kính làm mờ (`radius`, mặc định `20`) và số lần lặp (`power`, mặc định `2`).
     3. **Smart Blur**: Làm mờ thông minh - Giúp làm mờ nhưng giữ lại các đường nét biên sắc nét của hình ảnh. Hỏi nhập bán kính (`radius`, mặc định `5`), độ mạnh (`strength`, mặc định `1.0`), và ngưỡng chi tiết (`threshold`, mặc định `-0.5`).
+* **`[E] Cài đặt phơi sáng nền (Exposure)`**:
+  * Cho phép điều chỉnh độ sáng/tối của video nền mờ theo đơn vị **EV (Exposure Value)** từ `-3.0` đến `3.0` (Mặc định: `0.0`).
+  * **`-1.0`**: Làm tối video nền đi 1 EV stop (giảm 50% ánh sáng nền, giúp video chính ở giữa nổi bật và dễ nhìn hơn).
+  * **`-0.5`**: Làm tối nhẹ video nền.
 
 ---
 
@@ -83,6 +87,8 @@ Bạn có thể truyền các tham số tùy biến trực tiếp khi chạy l�
   `rs --ratio 16:9` (hoặc `1:1`, `9:16`)
 * **Resize về kích thước tùy ý (không cần lưu trong cấu hình)**:
   `rs --width 1280 --height 720`
+* **Ghi đè phơi sáng / độ tối nền mờ**:
+  `rs --exposure -1.0` (hoặc `rs -e -1.0`)
 * **Ghi đè kiểu mờ và thông số mờ trực tiếp**:
   `rs --blur <kiểu_mờ> --prag <các_thông_số>`
   * *Ví dụ sử dụng Gaussian Blur với độ mịn 30 và bước lặp 5:*
