@@ -260,20 +260,39 @@ export async function resizeVideo(
     ? options.blurOverrideExposure 
     : (config.exposure !== undefined ? config.exposure : 0.0);
 
+  // Performance Optimization:
+  // Downscale background to max 480px dimension to calculate blur and exposure on ~80% fewer pixels.
+  // Then upscale back to target dimensions with fast_bilinear. Visually identical for heavy blur.
+  const maxBgDim = 480;
+  const scaleRatio = Math.min(1, maxBgDim / Math.max(targetW, targetH));
+  const bgW = Math.round((targetW * scaleRatio) / 2) * 2;
+  const bgH = Math.round((targetH * scaleRatio) / 2) * 2;
+
+  // Scale blur parameters proportionally to the downscaled resolution
+  const scaledBlurOpts: any = { ...blurOpts };
+  if (blurFilter === 'gblur' && typeof blurOpts.sigma === 'number') {
+    scaledBlurOpts.sigma = Math.max(1, Math.round(blurOpts.sigma * scaleRatio));
+    scaledBlurOpts.steps = Math.min(2, blurOpts.steps || 3);
+  } else if (blurFilter === 'boxblur' && typeof blurOpts.lr === 'number') {
+    scaledBlurOpts.lr = Math.max(1, Math.round(blurOpts.lr * scaleRatio));
+  } else if (blurFilter === 'smartblur' && typeof blurOpts.lr === 'number') {
+    scaledBlurOpts.lr = Math.max(1, Math.round(blurOpts.lr * scaleRatio));
+  }
+
   // Build the filter description array for fluent-ffmpeg complexFilter:
-  // 1. bg_scale: scale input video so it's large enough to cover the target box completely
-  // 2. bg_crop: crop the scaled background to fit the target width and height exactly
-  // 3. bg_blur: apply the chosen blur to the cropped background
-  // 4. bg_dark (optional): adjust exposure EV of background
-  // 5. fg_scale: scale original input video to fit inside target box, keeping original aspect ratio
-  // 6. overlay: overlay fg centered on top of background
-  let bgOutput = 'bg_blur';
+  // 1. bg_scale: scale input video down to ~480p resolution
+  // 2. bg_crop: crop the scaled background to fit the target aspect ratio
+  // 3. bg_blur: apply blur at 480p (runs ~5x faster than 1080p/4K)
+  // 4. bg_dark (optional): adjust exposure EV of background at 480p
+  // 5. bg_upscale: upscale blurred background back to target resolution for canvas
+  // 6. fg_scale: scale original input video to fit inside target box, keeping original aspect ratio
+  // 7. overlay: overlay fg centered on top of background
   const filters: any[] = [
     {
       filter: 'scale',
       options: {
-        w: targetW,
-        h: targetH,
+        w: bgW,
+        h: bgH,
         force_original_aspect_ratio: 'increase'
       },
       inputs: '0:v',
@@ -282,19 +301,21 @@ export async function resizeVideo(
     {
       filter: 'crop',
       options: {
-        w: targetW,
-        h: targetH
+        w: bgW,
+        h: bgH
       },
       inputs: 'bg_scale',
       outputs: 'bg_crop'
     },
     {
       filter: blurFilter,
-      options: blurOpts,
+      options: scaledBlurOpts,
       inputs: 'bg_crop',
       outputs: 'bg_blur'
     }
   ];
+
+  let bgOutput = 'bg_blur';
 
   if (targetExposure !== 0) {
     filters.push({
@@ -306,6 +327,21 @@ export async function resizeVideo(
       outputs: 'bg_dark'
     });
     bgOutput = 'bg_dark';
+  }
+
+  // Upscale background to target resolution if downscaled
+  if (bgW < targetW || bgH < targetH) {
+    filters.push({
+      filter: 'scale',
+      options: {
+        w: targetW,
+        h: targetH,
+        flags: 'fast_bilinear'
+      },
+      inputs: bgOutput,
+      outputs: 'bg_upscaled'
+    });
+    bgOutput = 'bg_upscaled';
   }
 
   filters.push(
@@ -350,7 +386,13 @@ export async function resizeVideo(
         outputOpts.push('-preset medium');
       }
 
-      ffmpeg(inputPath)
+      const cmd = ffmpeg(inputPath);
+      // Enable hardware decoding if using hardware acceleration
+      if (!isCpu) {
+        cmd.inputOptions(['-hwaccel auto']);
+      }
+
+      cmd
         .complexFilter(filters)
         .outputOptions(outputOpts)
         .output(outputPath)
