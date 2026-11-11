@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import readline from 'readline';
@@ -57,6 +57,40 @@ function getFormattedDate(): string {
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '');
+}
+
+// Ask Windows to suspend the machine through a detached child process.
+// powrprof.SetSuspendState hibernates instead of sleeping when hibernation is enabled.
+function putSystemToSleep(): void {
+  const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+  const child = spawn(path.join(system32, 'rundll32.exe'), ['powrprof.dll,SetSuspendState', '0,1,0'], {
+    stdio: 'ignore',
+    detached: true,
+    windowsHide: true
+  });
+  child.on('error', (err) => {
+    console.error(chalk.red(`\nKhông thể đưa máy vào chế độ ngủ: ${err.message}`));
+  });
+  child.unref();
+}
+
+// Wait out a cancellable countdown (Ctrl+C aborts), then suspend the machine.
+async function sleepAfterCountdown(seconds: number): Promise<void> {
+  if (process.platform !== 'win32') {
+    console.log(chalk.red('Tự động ngủ chỉ được hỗ trợ trên Windows. Bỏ qua.'));
+    return;
+  }
+
+  for (let remaining = seconds; remaining > 0; remaining--) {
+    process.stdout.write(`\r${chalk.yellow(`Máy sẽ vào chế độ ngủ sau ${remaining}s (nhấn Ctrl+C để hủy)...`)} `);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  process.stdout.write(`\r${' '.repeat(64)}\r`);
+  console.log(chalk.bold.magenta('Đang đưa máy vào chế độ ngủ (Sleep)...'));
+
+  putSystemToSleep();
+  // Let the detached child fire before this process exits.
+  await new Promise(resolve => setTimeout(resolve, 1500));
 }
 
 async function main() {
@@ -177,6 +211,10 @@ async function main() {
     const parsedExp = expStr ? parseFloat(expStr) : 0.0;
     tempExposure = isNaN(parsedExp) ? 0.0 : Math.max(-3.0, Math.min(3.0, parsedExp));
   }
+
+  // Ask whether the machine should sleep once every render has finished
+  const sleepAnswer = (await askQuestion(chalk.yellow('Tự động đưa máy vào chế độ ngủ (Sleep) khi hoàn tất? ( y/n ) [n]: '))).toLowerCase();
+  const autoSleep = yesOptions.includes(sleepAnswer);
 
   // Get dimensions from global config
   const config = loadGlobalConfig();
@@ -351,6 +389,10 @@ async function main() {
   }
 
   console.log(chalk.bold.green('\nTất cả các tiến trình đã hoàn tất!\n'));
+
+  if (autoSleep) {
+    await sleepAfterCountdown(10);
+  }
 }
 
 main().catch(err => {

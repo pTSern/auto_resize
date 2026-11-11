@@ -1,6 +1,6 @@
 {
   "name": "auto-resize-video",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI tool to resize videos with a blurred background",
   "type": "module",
   "main": "./dist/index.js",

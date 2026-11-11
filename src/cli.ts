@@ -501,6 +501,6 @@ cli.help(() => {
   printGuide();
   process.exit(0);
 });
-cli.version('1.0.0');
+cli.version('1.0.1');
 
 cli.parse();

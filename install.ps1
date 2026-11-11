@@ -1,10 +1,26 @@
 # install.ps1 - Automated Installer for auto_resize CLI tool
 $ErrorActionPreference = "Stop"
 
-# 1. Self-Elevate to Administrator if not already running as Admin
+# 1. Elevate to Administrator only when the work actually needs it:
+#    installing Node.js, or writing into a global npm prefix the user cannot write to.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Host "This installation requires Administrator rights to install Node.js and register global CLI commands." -ForegroundColor Yellow
+$nodeInstalled = [bool](Get-Command node -ErrorAction SilentlyContinue)
+
+$npmPrefix = $null
+try { $npmPrefix = (& npm config get prefix 2>$null | Select-Object -First 1) } catch {}
+$prefixWritable = $false
+if ($npmPrefix -and (Test-Path $npmPrefix)) {
+    $probePath = Join-Path $npmPrefix ".auto_resize_write_test"
+    try {
+        [System.IO.File]::WriteAllText($probePath, "")
+        Remove-Item $probePath -Force
+        $prefixWritable = $true
+    } catch {}
+}
+
+$needsElevation = (-not $isAdmin) -and ((-not $nodeInstalled) -or (-not $prefixWritable))
+if ($needsElevation) {
+    Write-Host "This installation needs Administrator rights (Node.js install or protected npm prefix)." -ForegroundColor Yellow
     Write-Host "Requesting elevation..." -ForegroundColor Yellow
     
     # Resolve script path. If run via iex, we download the script to a temp file first.
@@ -29,6 +45,7 @@ try {
 
     # 2. Check Node.js and install if missing
     $nodeInstalled = $false
+
     try {
         $nodeVersion = node -v 2>$null
         if ($nodeVersion) {
@@ -63,9 +80,13 @@ try {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
 
-    # 3. Create the global configuration file with 1:1, 9:16, 16:9 defaults
+    # 3. Create the global configuration file with defaults on first install only.
+    #    An update MUST keep the user's dimensions, replacer, blur and exposure settings.
     $configPath = Join-Path $env:USERPROFILE ".auto_resize_config.json"
-    $configJson = @"
+    if (Test-Path $configPath) {
+        Write-Host "Keeping existing configuration at $configPath" -ForegroundColor Gray
+    } else {
+        $configJson = @"
 {
   "dimensions": [
     { "w": 1, "h": 1 },
@@ -74,9 +95,10 @@ try {
 }
 "@
 
-    Write-Host "Generating global configuration at $configPath..." -ForegroundColor Cyan
-    [System.IO.File]::WriteAllText($configPath, $configJson)
-    Write-Host "Global configuration created!" -ForegroundColor Green
+        Write-Host "Generating global configuration at $configPath..." -ForegroundColor Cyan
+        [System.IO.File]::WriteAllText($configPath, $configJson)
+        Write-Host "Global configuration created!" -ForegroundColor Green
+    }
 
     # 4. Clone or Download Repository from GitHub
     $tempDir = Join-Path $env:TEMP "auto_resize_source"
@@ -134,12 +156,30 @@ try {
         }
     }
 
+    $isUpdate = [bool](Get-Command srs -ErrorAction SilentlyContinue)
+    if ($isUpdate) {
+        Write-Host "Existing installation found. Updating commands (rs, srs, rss, rsh, rsi)..." -ForegroundColor Cyan
+    } else {
+        Write-Host "No previous installation found. Installing commands (rs, srs, rss, rsh, rsi)..." -ForegroundColor Cyan
+    }
+
     Write-Host "Running npm install..." -ForegroundColor Gray
     & $npmCmd install
     Write-Host "Running npm build..." -ForegroundColor Gray
     & $npmCmd run build
     Write-Host "Installing command globally..." -ForegroundColor Gray
     & $npmCmd install -g .
+
+    # Verify every advertised command shim was (re)written by the global install
+    $shimDir = (& $npmCmd prefix 2>$null | Select-Object -First 1)
+    if ($shimDir -and (Test-Path $shimDir)) {
+        $expectedShims = @("auto_resize", "rs", "srs", "rss", "rsh", "rsi")
+        $missingShims = @($expectedShims | Where-Object { -not (Test-Path (Join-Path $shimDir "$($_).cmd")) })
+        if ($missingShims.Count -gt 0) {
+            throw New-Object System.Exception("Command shims were not installed: $($missingShims -join ', ') in $shimDir")
+        }
+        Write-Host "Command shims updated in $shimDir" -ForegroundColor Green
+    }
 
     Write-Host "Creating Start Menu shortcuts for Windows Search..." -ForegroundColor Gray
     try {
@@ -191,8 +231,9 @@ try {
         Write-Host "Warning: Could not create Start Menu shortcuts: $_" -ForegroundColor Yellow
     }
 
+    $installedVersion = (Get-Content (Join-Path $tempDir "package.json") -Raw | ConvertFrom-Json).version
     Write-Host "====================================================" -ForegroundColor Green
-    Write-Host " SUCCESS: Installation complete!" -ForegroundColor Green
+    Write-Host " SUCCESS: Installation complete! (v$installedVersion)" -ForegroundColor Green
     Write-Host " Use it anywhere in your terminal:" -ForegroundColor Green
     Write-Host "   auto_resize <video_path> (Or 'rs')" -ForegroundColor Yellow
     Write-Host "   srs (To open the File browser popup dialog)" -ForegroundColor Yellow
