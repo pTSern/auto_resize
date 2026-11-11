@@ -59,18 +59,23 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '');
 }
 
-// Ask Windows to suspend the machine through a detached child process.
-// powrprof.SetSuspendState hibernates instead of sleeping when hibernation is enabled.
 function putSystemToSleep(): void {
   const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-  const child = spawn(path.join(system32, 'rundll32.exe'), ['powrprof.dll,SetSuspendState', '0,1,0'], {
+  const powershellPath = path.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+
+  // Arguments: [PowerState]::Suspend, force = $false, disableWakeEvent = $false
+  const psCommand = 'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)';
+
+  const child = spawn(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
     stdio: 'ignore',
     detached: true,
     windowsHide: true
   });
+
   child.on('error', (err) => {
     console.error(chalk.red(`\nKhông thể đưa máy vào chế độ ngủ: ${err.message}`));
   });
+
   child.unref();
 }
 

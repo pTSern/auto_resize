@@ -19,7 +19,7 @@ Bạn có thể mở cửa sổ Command Prompt (CMD), PowerShell hoặc tìm ki�
    * **Mục đích**: Mở hộp thoại đồ họa của Windows giúp bạn chọn một hoặc nhiều file `.mp4` bằng chuột (giữ `CTRL` hoặc `SHIFT` để chọn nhiều file).
    * **Cách dùng**: Nhập `srs` trên terminal hoặc tìm kiếm `"Select Resize (srs)"` trên Start Menu.
    * **Tự động ngủ (Auto Sleep)**: Trong lúc chạy, công cụ hỏi `Tự động đưa máy vào chế độ ngủ (Sleep) khi hoàn tất? ( y/n ) [n]`. Chọn `y` để sau khi render xong toàn bộ video, máy đếm ngược 10 giây rồi tự đưa Windows vào chế độ Sleep (nhấn `Ctrl+C` trong 10 giây đó để hủy).
-     * Chỉ áp dụng trên Windows. Nếu bật chế độ ngủ đông (Hibernate), `powrprof.dll,SetSuspendState` sẽ đưa máy vào Hibernate thay vì Sleep.
+     * Chỉ áp dụng trên Windows. Sử dụng PowerShell với `force = $false` để đảm bảo an toàn cho các tiến trình đang chạy. (Lưu ý: nếu hệ thống bật Hibernate, `SetSuspendState` có thể đưa máy vào Hibernate thay vì Sleep).
 
 3. **`rss` (Resize Settings - Cài đặt cấu hình)**:
    * **Mục đích**: Quản lý danh sách kích thước xuất ra, thay đổi từ khóa thay thế tên file, hoặc đổi kiểu làm mờ nền (Blur).
