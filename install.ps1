@@ -382,6 +382,21 @@ try {
         Write-Host "No previous installation found. Installing commands (rs, srs, rss, rsh, rsi)..." -ForegroundColor Cyan
     }
 
+    # Resolve global npm prefix before installing so we can clean stale symlinks/junctions
+    $shimDir = Get-GlobalNpmPrefix -NpmCommand $npmCmd
+    if (-not $shimDir) {
+        throw New-Object System.Exception("Could not resolve global npm prefix directory.")
+    }
+
+    $nodeCmd = "node"
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        $nodePath = Join-Path $env:ProgramFiles "nodejs\node.exe"
+        if (Test-Path $nodePath) {
+            $nodeCmd = $nodePath
+        }
+    }
+
+    $tarballPath = $null
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
@@ -397,19 +412,53 @@ try {
             throw New-Object System.Exception("npm run build failed with exit code $LASTEXITCODE")
         }
 
-        Write-Host "Installing command globally..." -ForegroundColor Gray
-        & $npmCmd install -g .
+        # Pack into a tarball and install from tarball instead of `npm install -g .`
+        # This avoids Windows cross-drive / existing-directory symlink EISDIR (-4068) errors
+        # and prevents the global install from breaking if %TEMP% is cleaned later.
+        Write-Host "Packaging release archive (npm pack)..." -ForegroundColor Gray
+        $packOut = @(& $npmCmd pack)
         if ($LASTEXITCODE -ne 0) {
-            throw New-Object System.Exception("npm install -g . failed with exit code $LASTEXITCODE")
+            throw New-Object System.Exception("npm pack failed with exit code $LASTEXITCODE")
+        }
+        $tgzName = ($packOut | Where-Object { "$_".Trim() -match '\.tgz$' } | Select-Object -Last 1)
+        if ($tgzName) {
+            $tarballPath = Join-Path $tempDir "$tgzName".Trim()
+        }
+        if (-not $tarballPath -or -not (Test-Path $tarballPath)) {
+            $latestTgz = Get-ChildItem -Path $tempDir -Filter "*.tgz" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($latestTgz) { $tarballPath = $latestTgz.FullName }
+        }
+        if (-not $tarballPath -or -not (Test-Path $tarballPath)) {
+            throw New-Object System.Exception("npm pack did not produce a .tgz archive in $tempDir")
+        }
+
+        # Remove any stale global package folder or legacy symlink/junction cleanly before installing
+        $existingPkgDir = Join-Path $shimDir "node_modules\auto-resize-video"
+        if (Test-Path $existingPkgDir) {
+            $pkgItem = Get-Item -Path $existingPkgDir -Force -ErrorAction SilentlyContinue
+            if ($pkgItem -and ($pkgItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                # ReparsePoint (junction/symlink): rmdir unlinks only the junction, never its target
+                cmd /c "rmdir `"$existingPkgDir`"" 2>$null
+            } else {
+                Remove-DirectoryForce -Path $existingPkgDir
+            }
+        }
+
+        Write-Host "Installing command globally..." -ForegroundColor Gray
+        & $npmCmd install -g "$tarballPath"
+        if ($LASTEXITCODE -ne 0) {
+            throw New-Object System.Exception("npm install -g failed with exit code $LASTEXITCODE")
         }
     } finally {
         $ErrorActionPreference = $prevEap
+        if ($tarballPath -and (Test-Path $tarballPath)) {
+            Remove-Item -Path $tarballPath -Force -ErrorAction SilentlyContinue
+        }
     }
 
     # Verify every advertised command shim was (re)written in the GLOBAL npm prefix
-    $shimDir = Get-GlobalNpmPrefix -NpmCommand $npmCmd
-    if (-not $shimDir -or -not (Test-Path $shimDir)) {
-        throw New-Object System.Exception("Could not resolve global npm prefix directory (got: '$shimDir')")
+    if (-not (Test-Path $shimDir)) {
+        throw New-Object System.Exception("Global npm prefix directory does not exist: '$shimDir'")
     }
 
     $expectedShims = @("auto-resize", "auto_resize", "rs", "srs", "rss", "rsh", "rsi")
@@ -418,6 +467,33 @@ try {
         throw New-Object System.Exception("Command shims were not installed: $($missingShims -join ', ') in $shimDir")
     }
     Write-Host "Command shims updated in $shimDir" -ForegroundColor Green
+
+    # Ensure ffmpeg-static binary was downloaded (npm 11+ allow-scripts may skip ffmpeg-static's install.js)
+    $ffmpegCandidateDirs = @(
+        (Join-Path $shimDir "node_modules\auto-resize-video\node_modules\ffmpeg-static"),
+        (Join-Path $shimDir "node_modules\ffmpeg-static")
+    )
+    $ffmpegStaticDir = $ffmpegCandidateDirs | Where-Object { Test-Path (Join-Path $_ "install.js") } | Select-Object -First 1
+    if ($ffmpegStaticDir) {
+        $ffmpegExe = Join-Path $ffmpegStaticDir "ffmpeg.exe"
+        if (-not (Test-Path $ffmpegExe)) {
+            Write-Host "ffmpeg.exe was skipped by npm script policy. Downloading ffmpeg binary..." -ForegroundColor Yellow
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            Push-Location $ffmpegStaticDir
+            try {
+                & $nodeCmd "install.js"
+                $ffmpegExit = $LASTEXITCODE
+            } finally {
+                Pop-Location
+                $ErrorActionPreference = $prevEap
+            }
+            if ($ffmpegExit -ne 0 -or -not (Test-Path $ffmpegExe)) {
+                throw New-Object System.Exception("Failed to download ffmpeg.exe via ffmpeg-static/install.js (exit code $ffmpegExit)")
+            }
+            Write-Host "ffmpeg.exe downloaded successfully!" -ForegroundColor Green
+        }
+    }
 
     # Ensure the global npm shim directory is on PATH so commands work in every terminal
     $pathScope = if ($isAdmin -and ($shimDir -like "$env:ProgramFiles*")) { "Machine" } else { "User" }
