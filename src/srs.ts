@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync, spawn } from 'child_process';
+import { execSync, spawn, spawnSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import readline from 'readline';
@@ -59,43 +59,152 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '');
 }
 
-function putSystemToSleep(): void {
-  const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-  const powershellPath = path.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-
-  // Arguments: [PowerState]::Suspend, force = $false, disableWakeEvent = $false
-  const psCommand = 'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)';
-
-  const child = spawn(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
-    stdio: 'ignore',
-    detached: true,
-    windowsHide: true
-  });
-
-  child.on('error', (err) => {
-    console.error(chalk.red(`\nKhông thể đưa máy vào chế độ ngủ: ${err.message}`));
-  });
-
-  child.unref();
+function hasOtherFfmpegRunning(): boolean {
+  if (process.platform !== 'win32') return false;
+  try {
+    const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+    const explicitTasklist = path.join(system32, 'tasklist.exe');
+    const tasklistPath = fs.existsSync(explicitTasklist) ? explicitTasklist : 'tasklist.exe';
+    const res = spawnSync(tasklistPath, ['/FI', 'IMAGENAME eq ffmpeg.exe', '/FO', 'CSV', '/NH'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true
+    });
+    if (res.error || res.status !== 0) return false;
+    return /^"ffmpeg\.exe",/im.test(res.stdout || '');
+  } catch {
+    return false;
+  }
 }
 
-// Wait out a cancellable countdown (Ctrl+C aborts), then suspend the machine.
+function putSystemToSleep(): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+    const explicitPsPath = path.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const powershellPath = fs.existsSync(explicitPsPath) ? explicitPsPath : 'powershell.exe';
+
+    // Note: Win32 SetSuspendState ignores bForce on Windows Vista+, so sleep is immediate.
+    // bHibernate = false requests Sleep (S3/Modern Standby) rather than Hibernate.
+    const psCommand = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$ok = [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)',
+      'if (-not $ok) { [Console]::Error.WriteLine("SetSuspendState returned False (sleep may be disabled or unsupported)."); exit 2 }'
+    ].join('; ');
+
+    let stderr = '';
+    const child = spawn(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true
+    });
+
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (err) => {
+      console.error(chalk.red(`\nKhông thể đưa máy vào chế độ ngủ: ${err.message}`));
+      finish(false);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        finish(true);
+      } else {
+        const detail = stderr.trim() || `exit code ${code}`;
+        console.error(chalk.red(`\nKhông thể đưa máy vào chế độ ngủ: ${detail}`));
+        finish(false);
+      }
+    });
+  });
+}
+
+// Wait out a cancellable countdown (Ctrl+C, Esc, or Q aborts), then suspend the machine.
 async function sleepAfterCountdown(seconds: number): Promise<void> {
   if (process.platform !== 'win32') {
     console.log(chalk.red('Tự động ngủ chỉ được hỗ trợ trên Windows. Bỏ qua.'));
     return;
   }
 
-  for (let remaining = seconds; remaining > 0; remaining--) {
-    process.stdout.write(`\r${chalk.yellow(`Máy sẽ vào chế độ ngủ sau ${remaining}s (nhấn Ctrl+C để hủy)...`)} `);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+  if (hasOtherFfmpegRunning()) {
+    console.log(chalk.yellow('Phát hiện tiến trình ffmpeg.exe khác đang chạy. Bỏ qua tự động ngủ để tránh gián đoạn!'));
+    return;
   }
-  process.stdout.write(`\r${' '.repeat(64)}\r`);
-  console.log(chalk.bold.magenta('Đang đưa máy vào chế độ ngủ (Sleep)...'));
 
-  putSystemToSleep();
-  // Let the detached child fire before this process exits.
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  const cancelled = await new Promise<boolean>((resolve) => {
+    let done = false;
+    let remaining = seconds;
+    let timer: NodeJS.Timeout | null = null;
+    const isTty = Boolean(process.stdin.isTTY);
+
+    const finish = (wasCancelled: boolean) => {
+      if (done) return;
+      done = true;
+      if (timer) clearInterval(timer);
+      process.removeListener('SIGINT', onSigInt);
+      if (isTty) {
+        process.stdin.removeListener('data', onKey);
+        try { process.stdin.setRawMode(false); } catch {}
+        process.stdin.pause();
+      }
+      process.stdout.write(`\r${' '.repeat(82)}\r`);
+      resolve(wasCancelled);
+    };
+
+    const onSigInt = () => finish(true);
+    const onKey = (chunk: Buffer) => {
+      const key = chunk.toString('utf8');
+      // Only cancel on explicit abort keys (Ctrl+C, Esc, q/Q) so stray buffered Enter/Space doesn't abort
+      if (key === '\u0003' || key === '\u001b' || key === 'q' || key === 'Q') {
+        finish(true);
+      }
+    };
+
+    const renderTick = () => {
+      process.stdout.write(
+        `\r${chalk.yellow(`Máy sẽ vào chế độ ngủ sau ${remaining}s (nhấn Q / Esc / Ctrl+C để hủy)...`)} `
+      );
+    };
+
+    process.on('SIGINT', onSigInt);
+    if (isTty) {
+      try {
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.on('data', onKey);
+      } catch {}
+    }
+
+    renderTick();
+    timer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        finish(false);
+      } else {
+        renderTick();
+      }
+    }, 1000);
+  });
+
+  if (cancelled) {
+    console.log(chalk.cyan('Đã hủy chế độ tự động ngủ.'));
+    return;
+  }
+
+  // Re-check right before suspending in case another ffmpeg job started during countdown
+  if (hasOtherFfmpegRunning()) {
+    console.log(chalk.yellow('Phát hiện tiến trình ffmpeg.exe khác đang chạy. Đã hủy tự động ngủ.'));
+    return;
+  }
+
+  console.log(chalk.bold.magenta('Đang đưa máy vào chế độ ngủ (Sleep)...'));
+  await putSystemToSleep();
 }
 
 async function main() {
@@ -305,6 +414,9 @@ async function main() {
 
   console.log(chalk.cyan(`\nTiến hành resize ${files.length} video .mp4...\n`));
 
+  let successCount = 0;
+  let failCount = 0;
+
   for (let i = 0; i < files.length; i++) {
     const filePath = files[i];
     const originName = path.basename(filePath);
@@ -315,6 +427,7 @@ async function main() {
       metadata = await getVideoMetadata(filePath);
     } catch (err: any) {
       console.error(chalk.red(`  [Bỏ qua] Không thể probe metadata: ${err.message}`));
+      failCount += targets.length;
       continue;
     }
 
@@ -387,16 +500,31 @@ async function main() {
         });
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
         spinner.succeed(chalk.green(`  Đã hoàn thành trong ${duration}s!`));
+        successCount++;
       } catch (jobErr: any) {
         spinner.fail(chalk.red(`  Render thất bại: ${jobErr.message}`));
+        failCount++;
       }
     }
   }
 
-  console.log(chalk.bold.green('\nTất cả các tiến trình đã hoàn tất!\n'));
+  if (failCount === 0) {
+    console.log(chalk.bold.green(`\nTất cả các tiến trình đã hoàn tất! (${successCount} video)\n`));
+  } else if (successCount === 0) {
+    console.log(chalk.bold.red(`\nTất cả ${failCount} tiến trình render đều thất bại!\n`));
+  } else {
+    console.log(chalk.bold.yellow(`\nHoàn tất với ${successCount} thành công, ${failCount} thất bại.\n`));
+  }
 
   if (autoSleep) {
-    await sleepAfterCountdown(10);
+    if (successCount === 0) {
+      console.log(chalk.red('Bỏ qua tự động ngủ (Auto Sleep) vì không có video nào render thành công.'));
+    } else {
+      if (failCount > 0) {
+        console.log(chalk.yellow(`[Cảnh báo] Có ${failCount} lượt render thất bại. Vẫn tiếp tục đếm ngược tự động ngủ (nhấn Q / Esc / Ctrl+C để hủy).`));
+      }
+      await sleepAfterCountdown(10);
+    }
   }
 }
 

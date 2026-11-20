@@ -18,8 +18,10 @@ Bạn có thể mở cửa sổ Command Prompt (CMD), PowerShell hoặc tìm ki�
 2. **`srs` (Select Resize - Giao diện chọn file)**:
    * **Mục đích**: Mở hộp thoại đồ họa của Windows giúp bạn chọn một hoặc nhiều file `.mp4` bằng chuột (giữ `CTRL` hoặc `SHIFT` để chọn nhiều file).
    * **Cách dùng**: Nhập `srs` trên terminal hoặc tìm kiếm `"Select Resize (srs)"` trên Start Menu.
-   * **Tự động ngủ (Auto Sleep)**: Trong lúc chạy, công cụ hỏi `Tự động đưa máy vào chế độ ngủ (Sleep) khi hoàn tất? ( y/n ) [n]`. Chọn `y` để sau khi render xong toàn bộ video, máy đếm ngược 10 giây rồi tự đưa Windows vào chế độ Sleep (nhấn `Ctrl+C` trong 10 giây đó để hủy).
-     * Chỉ áp dụng trên Windows. Sử dụng PowerShell với `force = $false` để đảm bảo an toàn cho các tiến trình đang chạy. (Lưu ý: nếu hệ thống bật Hibernate, `SetSuspendState` có thể đưa máy vào Hibernate thay vì Sleep).
+   * **Tự động ngủ (Auto Sleep)**: Trong lúc chạy, công cụ hỏi `Tự động đưa máy vào chế độ ngủ (Sleep) khi hoàn tất? ( y/n ) [n]`. Chọn `y` để sau khi render xong toàn bộ video, máy đếm ngược 10 giây rồi tự đưa Windows vào chế độ Sleep (nhấn `Q`, `Esc` hoặc `Ctrl+C` trong 10 giây đó để hủy).
+     * Chỉ áp dụng trên Windows. Dùng PowerShell gọi `Application.SetSuspendState(PowerState.Suspend, $false, $false)` để giữ nguyên trạng thái RAM và các ứng dụng đang mở.
+     * **Cơ chế bảo vệ**: Tự động bỏ qua Sleep nếu toàn bộ lượt render thất bại hoặc phát hiện tiến trình `ffmpeg.exe` khác đang chạy; báo lỗi trực tiếp nếu Windows từ chối vào Sleep.
+     * **Lưu ý**: Trên Windows 10/11, hệ điều hành bỏ qua tham số `force = $false` và vào Sleep ngay khi được gọi — các tác vụ mạng (upload/download/SSH) sẽ bị ngắt kết nối khi máy ngủ.
 
 3. **`rss` (Resize Settings - Cài đặt cấu hình)**:
    * **Mục đích**: Quản lý danh sách kích thước xuất ra, thay đổi từ khóa thay thế tên file, hoặc đổi kiểu làm mờ nền (Blur).
